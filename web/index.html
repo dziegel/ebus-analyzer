@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="light dark" />
+    <title>EBus Analyzer</title>
+    <link rel="stylesheet" href="styles.css" />
+    <script type="module" src="dist/main.js"></script>
+  </head>
+  <body>
+    <header class="topbar">
+      <h1>EBus Analyzer</h1>
+      <div id="status" class="status" aria-live="polite"></div>
+      <div class="topbar-actions">
+        <button type="button" id="btn-connect">Connect</button>
+        <button type="button" id="btn-settings" class="icon" aria-label="Settings" title="Settings">⚙</button>
+      </div>
+    </header>
+
+    <div id="devices" class="devices"></div>
+
+    <section class="toolbar">
+      <input id="search" type="search" placeholder="Search address, PB SB, hex, device…" aria-label="Search" />
+      <div class="segmented" role="group" aria-label="Filter">
+        <button type="button" data-filter="all" class="active">All</button>
+        <button type="button" data-filter="unknown">Unknown</button>
+        <button type="button" data-filter="new">New</button>
+      </div>
+      <label class="sort">Sort
+        <select id="sort">
+          <option value="count">Frequency</option>
+          <option value="lastSeen">Last seen</option>
+          <option value="firstSeen">First seen</option>
+          <option value="interval">Interval</option>
+          <option value="address">Address</option>
+        </select>
+      </label>
+      <div class="toolbar-actions">
+        <button type="button" id="btn-seen">Mark all seen</button>
+        <button type="button" id="btn-import">Import</button>
+        <button type="button" id="btn-export">Export</button>
+        <button type="button" id="btn-clear" class="danger">Clear</button>
+        <input id="file" type="file" accept=".json,.txt,.log,text/plain,application/json" hidden />
+      </div>
+    </section>
+
+    <div id="counts" class="counts"></div>
+
+    <main class="layout">
+      <div class="table-wrap">
+        <table class="telegrams">
+          <thead>
+            <tr>
+              <th></th>
+              <th>From</th>
+              <th>To</th>
+              <th>PB SB</th>
+              <th>ID</th>
+              <th>Data</th>
+              <th>Response</th>
+              <th class="c-num">Count · interval</th>
+              <th class="c-num">Last seen</th>
+            </tr>
+          </thead>
+          <tbody id="rows"></tbody>
+        </table>
+      </div>
+      <aside id="detail" class="detail" hidden></aside>
+    </main>
+
+    <dialog id="settings">
+      <form method="dialog">
+        <h2>Settings</h2>
+        <label>Bridge URL
+          <input id="set-url" type="text" required placeholder="ws://raspberrypi:8080/ebusd" />
+        </label>
+        <p class="hint">WebSocket address of <code>bridge/ebusd-bridge.mjs</code>. Pages served over HTTPS can only use <code>wss://</code>.</p>
+        <label>Poll interval (seconds)
+          <input id="set-interval" type="number" min="1" max="600" step="1" required />
+        </label>
+        <div class="dialog-actions">
+          <button value="cancel" formnovalidate>Cancel</button>
+          <button value="save" class="primary">Save</button>
+        </div>
+      </form>
+    </dialog>
+  </body>
+</html>
