@@ -199,7 +199,7 @@ the TCP command port therefore needs a bridge (see ARCH-2 and open question Q1).
 | Q3 | TypeSpec in the browser | Confirm that the TypeSpec compiler plus `@ebusd/ebus-typespec` can be bundled and run fully client-side (the TypeSpec playground suggests yes). |
 | Q4 | Decoding source | Decode directly from compiled TypeSpec, or from the generated CSV that ebusd uses? CSV is simpler; TypeSpec avoids a second format. |
 | Q5 | Capture method | Polling `grab result all` returns only the last payload per key; full history may need ebusd's raw/capture log output instead. |
-| Q6 | License | ebusd-configuration is GPL-3.0. Definitions are fetched at runtime, not bundled; choose the app license accordingly. |
+| Q6 | License | The app is Apache-2.0. ebusd-configuration is GPL-3.0, so its definitions must be fetched at runtime and never bundled into the app or this repository. |
 
 ---
 
