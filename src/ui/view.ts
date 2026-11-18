@@ -1,8 +1,10 @@
 import type { Decoded } from '../defs/repository.ts';
+import type { AnnotationStore } from '../store/annotations.ts';
 import type { Entry } from '../store/telegram-store.ts';
 import { hex2 } from './format.ts';
 
-export type FilterMode = 'all' | 'unknown' | 'new';
+/** 'all' hides ignored messages; 'ignored' shows only those. */
+export type FilterMode = 'all' | 'unknown' | 'new' | 'ignored';
 export type SortMode = 'count' | 'lastSeen' | 'firstSeen' | 'interval' | 'address';
 
 export interface ViewState {
@@ -17,6 +19,8 @@ export interface ViewContext {
   decoded?: (e: Entry) => Decoded | undefined;
   /** True when definitions are loaded: "known" then means "decoded by the app". */
   definitionsLoaded?: boolean;
+  /** Notes, tags and ignored flags (UNK-9). */
+  annotations?: AnnotationStore;
 }
 
 /** Whether a message is known: decoded by the loaded definitions, else ebusd's flag. */
@@ -41,6 +45,7 @@ function searchText(e: Entry, ctx: ViewContext): string {
     ctx.deviceName?.(e.target) ?? '',
     e.kind,
     d ? `${d.def.circuit}.${d.def.name} ${d.def.comment ?? ''}` : '',
+    ctx.annotations?.searchText(e.key) ?? '',
   ]
     .join(' ')
     .toLowerCase();
@@ -50,6 +55,8 @@ function searchText(e: Entry, ctx: ViewContext): string {
 export function applyView(entries: readonly Entry[], view: ViewState, ctx: ViewContext = {}): Entry[] {
   const terms = view.search.toLowerCase().split(/\s+/).filter(Boolean);
   const filtered = entries.filter((e) => {
+    const ignored = ctx.annotations?.isIgnored(e.key) ?? false;
+    if (ignored !== (view.filter === 'ignored')) return false;
     if (view.filter === 'unknown' && isKnown(e, ctx) === true) return false;
     if (view.filter === 'new' && !e.isNew) return false;
     if (terms.length) {

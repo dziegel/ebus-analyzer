@@ -7,9 +7,11 @@ Browser tool that simplifies reverse engineering of eBUS traffic using
 - Highlights new and unknown telegrams and the bytes that change
 - Decodes telegrams with the definitions from
   [ebusd-configuration](https://github.com/john30/ebusd-configuration)
+- Analyses unknown telegrams: byte heat map, decoding as candidate types,
+  value search, charts over time, notes and tags
 - Planned: reading/writing eBUS TypeSpec definitions and an assistant for unknown telegrams
 
-Status: milestones M1 (capture) and M2 (decoding) done. See [docs/REQUIREMENTS.md](docs/REQUIREMENTS.md).
+Status: milestones M1 (capture), M2 (decoding) and M3 (analysis) done. See [docs/REQUIREMENTS.md](docs/REQUIREMENTS.md).
 
 ## How it works
 
@@ -46,6 +48,25 @@ TypeSpec sources of ebusd-configuration. One file is picked per device
 
 The decoder is a port of ebusd's data types and field handling and is checked
 against ebusd's own test vectors (see Development).
+
+## Analysing unknown messages
+
+- **Byte analysis** (detail panel): every byte of a message as a cell, darker
+  the more often it changes; `x` marks the bits that changed. Selecting a byte
+  shows it decoded as the common eBUS types (UCH, D1C, D2C, UIN/10, EXP, …)
+  with the range seen in the history.
+- **Find value**: enter a value you know from the display (`35.5`, `45,5 °C`)
+  or a text. All byte positions of all (unknown) messages are decoded with the
+  candidate types and compared, optionally including older payloads.
+- **Charts**: any candidate or decoded field can be charted over time. The
+  charts share one time axis, so an unknown byte can be compared with a known
+  value (e.g. the outside temperature) at a glance.
+- **Notes, tags, ignore**: per message; included in search, export and import.
+  Ignored messages are hidden unless the *Ignored* filter is selected.
+
+The history keeps up to 1000 different payloads per message. Payloads are
+collected by polling ebusd's grab result, so a value that changes and changes
+back between two polls is missed (Q5 in the requirements).
 
 ## Quick start
 
@@ -119,6 +140,7 @@ type stripping.
 | `src/ebusd/` | ebusd response parsers, WebSocket client with command queue and reconnect |
 | `src/defs/` | eBUS data types, CSV definition parser, conditions, file selection, CDN loader, telegram matching |
 | `src/decoding.ts` | Decodes captured messages with the loaded definitions |
+| `src/analysis/` | Byte statistics, candidate types, value search, time series |
 | `src/store/` | Telegram aggregation (counts, intervals, history), IndexedDB persistence |
 | `src/ui/` | Filtering/sorting and HTML rendering |
 | `bridge/` | WebSocket ↔ TCP bridge and static file server |

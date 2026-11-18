@@ -26,6 +26,7 @@
         <button type="button" data-filter="all" class="active">All</button>
         <button type="button" data-filter="unknown">Unknown</button>
         <button type="button" data-filter="new">New</button>
+        <button type="button" data-filter="ignored">Ignored</button>
       </div>
       <label class="sort">Sort
         <select id="sort">
@@ -37,6 +38,7 @@
         </select>
       </label>
       <div class="toolbar-actions">
+        <button type="button" id="btn-find">Find value</button>
         <button type="button" id="btn-defs">Definitions</button>
         <button type="button" id="btn-seen">Mark all seen</button>
         <button type="button" id="btn-import">Import</button>
@@ -47,6 +49,8 @@
     </section>
 
     <div id="counts" class="counts"></div>
+
+    <section id="chart" class="chart" hidden aria-label="Charts over time"></section>
 
     <main class="layout">
       <div class="table-wrap">
@@ -104,6 +108,35 @@
         <div id="defs-report" class="defs-report"></div>
         <div class="dialog-actions">
           <button value="close">Close</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog id="find" class="wide">
+      <form id="find-form">
+        <h2>Find a value</h2>
+        <p class="hint">
+          Enter a value you know, e.g. the flow temperature shown on the display (<code>35.5</code>) or a text (<code>HMU</code>).
+          Every byte position of every message is decoded with the common eBUS types and compared.
+        </p>
+        <div class="row">
+          <label>Value
+            <input id="find-value" type="text" required placeholder="e.g. 35.5 °C" />
+          </label>
+          <label>Tolerance
+            <input id="find-tol" type="number" min="0" step="any" placeholder="auto" />
+          </label>
+        </div>
+        <div class="row checks">
+          <label class="check"><input id="find-unknown" type="checkbox" checked /> Only messages without definition</label>
+          <label class="check"><input id="find-history" type="checkbox" /> Also search older payloads</label>
+        </div>
+        <div class="dialog-actions left">
+          <button type="submit" class="primary">Search</button>
+        </div>
+        <div id="find-results" class="find-results"></div>
+        <div class="dialog-actions">
+          <button type="button" id="find-close">Close</button>
         </div>
       </form>
     </dialog>

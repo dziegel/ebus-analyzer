@@ -9,6 +9,8 @@ import type { Telegram } from '../ebus/telegram.ts';
 import type { Entry } from '../store/telegram-store.ts';
 import { ago, bytesHtml, dateTime, duration, esc, hex2, timestamp, varyingBytes } from './format.ts';
 import { isKnown, type ViewContext } from './view.ts';
+import { renderByteAnalysis, renderNotes, type ByteSelection } from './analysis.ts';
+import { seriesId } from '../analysis/series.ts';
 
 /** Resolves a bus address to a device name using the scan result (master → its slave). */
 export function deviceLookup(devices: readonly ScanDevice[]): (addr: number) => string | undefined {
@@ -110,7 +112,8 @@ export function renderCounts(all: readonly Entry[], shown: number, ctx: ViewCont
   const newCount = all.filter((e) => e.isNew).length;
   const unknown = all.filter((e) => isKnown(e, ctx) === false).length;
   const decoded = ctx.definitionsLoaded ? ` · ${all.length - unknown} decoded` : '';
-  return `${shown} of ${all.length} messages · <span class="new-text">${newCount} new</span> · ${unknown} unknown${decoded}`;
+  const ignored = ctx.annotations ? all.filter((e) => ctx.annotations!.isIgnored(e.key)).length : 0;
+  return `${shown} of ${all.length} messages · <span class="new-text">${newCount} new</span> · ${unknown} unknown${decoded}${ignored ? ` · ${ignored} ignored` : ''}`;
 }
 
 function knownBadge(e: Entry, ctx: ViewContext): string {
@@ -134,14 +137,22 @@ export function fieldSummary(fields: readonly DecodedField[], max = 3): string {
   return parts.join('; ');
 }
 
-function messageCell(d: Decoded | undefined): string {
-  if (!d) return '<span class="none">–</span>';
+function annotationHtml(e: Entry, ctx: ViewContext): string {
+  const a = ctx.annotations?.get(e.key);
+  if (!a) return '';
+  const tags = (a.tags ?? []).map((t) => `<span class="tag user">#${esc(t)}</span>`).join(' ');
+  const note = a.note ? `<span class="note" title="${esc(a.note)}">${esc(a.note.length > 60 ? `${a.note.slice(0, 57)}…` : a.note)}</span>` : '';
+  return `<div class="annot">${tags}${tags && note ? ' ' : ''}${note}</div>`;
+}
+
+function messageCell(d: Decoded | undefined, extra = ''): string {
+  if (!d) return extra || '<span class="none">–</span>';
   const name = `<b>${esc(d.def.circuit)}.${esc(d.def.name)}</b>`;
   let detail: string;
   if (d.chain && !d.chain.complete) detail = `<span class="muted">part ${d.chain.index + 1}/${d.chain.count}, waiting for other parts</span>`;
   else if (d.result.error) detail = `<span class="warn-text">${esc(d.result.error)}</span>`;
   else detail = `<span class="muted">${esc(fieldSummary(d.result.fields))}</span>`;
-  return `${name}<br><span class="small">${detail}</span>`;
+  return `${name}<br><span class="small">${detail}</span>${extra}`;
 }
 
 export function renderRows(
@@ -170,7 +181,7 @@ export function renderRows(
         `<td class="c-dst" data-label="To">${addressCell(e.target, name)}</td>` +
         `<td class="c-cmd mono" data-label="PB SB">${hex2(e.pb)} ${hex2(e.sb)}</td>` +
         `<td class="c-id mono" data-label="ID">${e.id ? esc(e.id) : '<span class="none">–</span>'}</td>` +
-        `<td class="c-msg" data-label="Message">${messageCell(ctx.decoded?.(e))}</td>` +
+        `<td class="c-msg" data-label="Message">${messageCell(ctx.decoded?.(e), annotationHtml(e, ctx))}</td>` +
         `<td class="c-data mono" data-label="Data">${bytesHtml(last?.master ?? '', varMaster)}</td>` +
         `<td class="c-slave mono" data-label="Response">${e.kind === 'master-slave' ? bytesHtml(last?.slave ?? '', varSlave) : '<span class="none">–</span>'}</td>` +
         `<td class="c-num" data-label="Count">${e.count}<span class="muted small"> · ${duration(e.intervalMs)}</span></td>` +
@@ -204,7 +215,7 @@ function fieldBytes(t: Telegram, f: DecodedField): string {
 const TYPE_TEXT: Record<string, string> = { r: 'read', w: 'write', u: 'passive', uw: 'passive write' };
 const CONDITION_TEXT: Record<string, string> = { none: '', true: 'conditions met', unknown: 'conditions unknown', false: 'conditions not met' };
 
-function renderDecoded(d: Decoded, t: Telegram | undefined): string {
+function renderDecoded(d: Decoded, t: Telegram | undefined, entryKey: string, charted: ReadonlySet<string>): string {
   const def = d.def;
   const source = d.file.url
     ? `<a href="${esc(d.file.url)}" target="_blank" rel="noopener">${esc(d.file.path)}:${def.line}</a>`
@@ -230,11 +241,12 @@ function renderDecoded(d: Decoded, t: Telegram | undefined): string {
           `<td>${f.ignored ? '<span class="muted">ignored</span>' : f.error ? `<span class="warn-text">${esc(f.error)}</span>` : `<b>${esc(f.text)}</b>${f.unit ? ` ${esc(f.unit)}` : ''}`}</td>` +
           `<td class="mono small">${t ? esc(fieldBytes(t, f)) : ''}${f.bits ? ` <span class="muted">bit ${f.bits.first}${f.bits.count > 1 ? `+${f.bits.count}` : ''}</span>` : ''}</td>` +
           `<td class="muted small">${esc(f.def.typeName)}${f.def.divisorValues && !f.def.values ? ` ${esc(f.def.divisorValues)}` : ''}</td>` +
-          `<td class="small">${esc(f.comment ?? '')}</td></tr>`,
+          `<td class="small">${esc(f.comment ?? '')}</td>` +
+          `<td>${!f.ignored && !f.error && f.raw !== undefined && f.name ? (charted.has(seriesId({ kind: 'field', key: entryKey, field: f.name })) ? '<span class="muted small">charted</span>' : `<button type="button" class="small" data-action="plot-field" data-field="${esc(f.name)}">Chart</button>`) : ''}</td></tr>`,
       )
       .join('');
     body =
-      `<table class="fields"><thead><tr><th>Field</th><th>Value</th><th>Bytes</th><th>Type</th><th>Comment</th></tr></thead><tbody>${rows}</tbody></table>` +
+      `<table class="fields"><thead><tr><th>Field</th><th>Value</th><th>Bytes</th><th>Type</th><th>Comment</th><th></th></tr></thead><tbody>${rows}</tbody></table>` +
       (d.result.error ? `<p class="warn-text small">${esc(d.result.error)}</p>` : '') +
       (d.result.extra ? `<p class="muted small">Not covered by the definition: ${d.result.extra.m ? `${d.result.extra.m} master byte(s) ` : ''}${d.result.extra.s ? `${d.result.extra.s} response byte(s)` : ''}</p>` : '');
   }
@@ -249,19 +261,26 @@ function renderDecoded(d: Decoded, t: Telegram | undefined): string {
 export interface DetailContext extends ViewContext {
   telegram?: (e: Entry) => Telegram | undefined;
   decodeSample?: (e: Entry, i: number) => Decoded | undefined;
+  /** Selected byte for the candidate table. */
+  selection?: ByteSelection;
+  /** IDs of the series currently shown in the chart. */
+  charted?: ReadonlySet<string>;
 }
+
+/** Number of history rows shown in the detail panel. */
+const HISTORY_ROWS = 100;
 
 export function renderDetail(e: Entry | undefined, ctx: DetailContext): string {
   if (!e) return '<p class="muted">Select a message to see its history.</p>';
   const name = ctx.deviceName ?? (() => undefined);
-  const varMaster = varyingBytes(e.history.map((s) => s.master));
-  const varSlave = varyingBytes(e.history.map((s) => s.slave));
   const decoded = ctx.decoded?.(e);
   const t = ctx.telegram?.(e);
   const showDecoded = !!decoded && !(decoded.chain && !decoded.chain.complete);
+  const charted = ctx.charted ?? new Set<string>();
   const rows = e.history
     .map((s, i) => ({ s, i }))
     .reverse()
+    .slice(0, HISTORY_ROWS + 1)
     .map(({ s, i }, n, arr) => {
       const prev = arr[n + 1]?.s;
       const changedMaster = prev ? diffIndices(prev.master, s.master) : new Set<number>();
@@ -275,6 +294,7 @@ export function renderDetail(e: Entry | undefined, ctx: DetailContext): string {
         `</tr>`
       );
     })
+    .slice(0, HISTORY_ROWS)
     .join('');
   const src = name(e.source);
   const dst = name(e.target);
@@ -284,7 +304,7 @@ export function renderDetail(e: Entry | undefined, ctx: DetailContext): string {
       <button type="button" class="icon" data-action="close-detail" aria-label="Close">×</button>
     </div>
     ${t ? `<p class="telegram mono">${telegramHtml(t)}</p>` : ''}
-    ${decoded ? renderDecoded(decoded, t) : ctx.definitionsLoaded ? '<p class="muted">No definition matches this message.</p>' : ''}
+    ${decoded ? renderDecoded(decoded, t, e.key, charted) : ctx.definitionsLoaded ? '<p class="muted">No definition matches this message.</p>' : ''}
     <dl class="facts">
       <dt>Type</dt><dd>${esc(e.kind)}</dd>
       <dt>From</dt><dd>${hex2(e.source)}${src ? ` (${esc(src)})` : ''}</dd>
@@ -299,9 +319,9 @@ export function renderDetail(e: Entry | undefined, ctx: DetailContext): string {
       ${e.isNew ? '<button type="button" data-action="mark-seen">Mark as seen</button>' : ''}
       <button type="button" data-action="copy">Copy telegram</button>
     </div>
-    <h3>Varying bytes</h3>
-    <p class="mono">${bytesHtml(e.history.at(-1)?.master ?? '', varMaster)}${e.kind === 'master-slave' ? ` / ${bytesHtml(e.history.at(-1)?.slave ?? '', varSlave)}` : ''}</p>
-    <h3>History <span class="muted small">(${e.history.length} distinct payloads, newest first, changed bytes marked)</span></h3>
+    ${renderNotes(e, ctx.annotations?.get(e.key), ctx.annotations?.tags() ?? [])}
+    ${renderByteAnalysis(e, ctx.selection, charted)}
+    <h3>History <span class="muted small">(${e.history.length} distinct payloads${e.history.length > HISTORY_ROWS ? `, newest ${HISTORY_ROWS} shown` : ''}, newest first, changed bytes marked)</span></h3>
     <table class="history"><thead><tr><th>Time</th><th>Data</th><th>Response</th>${showDecoded ? '<th>Decoded</th>' : ''}</tr></thead><tbody>${rows}</tbody></table>`;
 }
 

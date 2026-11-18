@@ -18,7 +18,13 @@ import {
   type DefinitionsState,
   type DetailContext,
 } from './ui/render.ts';
-import { applyView, type FilterMode, type SortMode, type ViewState } from './ui/view.ts';
+import { applyView, isKnown, type FilterMode, type SortMode, type ViewState } from './ui/view.ts';
+import { AnnotationStore, parseTags } from './store/annotations.ts';
+import { parseQuery, searchValue, type SearchHit } from './analysis/search.ts';
+import { buildSeries, seriesId, valueAt, type SeriesData, type SeriesSource } from './analysis/series.ts';
+import { chartLayout, renderChart, tFor, xFor, PLOT_LEFT, type ChartLayout } from './ui/chart.ts';
+import { renderSearchResults, type ByteSelection } from './ui/analysis.ts';
+import { esc, hex2, timestamp } from './ui/format.ts';
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 
@@ -27,6 +33,7 @@ const store = new TelegramStore();
 const client = new EbusdClient();
 const capture = new Capture(client, store, settings.pollIntervalMs);
 const decoding = new DecodingService();
+const annotations = new AnnotationStore();
 const cache: Cache = { get: kvGet, set: kvSet };
 const loader = new DefinitionLoader(cache);
 
@@ -36,6 +43,9 @@ let stateDetail: string | undefined;
 let defsState: DefinitionsState = { state: 'none' };
 let remoteFiles: LoadedFile[] = [];
 let localSources: Array<{ name: string; text: string }> = [];
+let selection: ByteSelection | undefined;
+let chartSources: SeriesSource[] = [];
+let searchHits: SearchHit[] = [];
 
 // ---------------------------------------------------------------------------
 // Rendering
@@ -47,16 +57,27 @@ function scheduleRender(): void {
 
 function viewContext(): DetailContext {
   const definitionsLoaded = !!decoding.definitions;
-  return {
+  const ctx: DetailContext = {
     deviceName: deviceLookup(capture.status.devices),
     definitionsLoaded,
     decoded: (e: Entry) => decoding.get(e.key),
+    annotations,
+    charted: new Set(chartSources.map(seriesId)),
     telegram: entryTelegram,
     decodeSample: (e: Entry, i: number) => {
       const s = e.history[i];
       return s ? decoding.decodeSample(e, s) : undefined;
     },
   };
+  if (selection) ctx.selection = selection;
+  return ctx;
+}
+
+/** Short name of a message: circuit.name if decoded, else its addresses and command. */
+function messageName(e: Entry): string {
+  const d = decoding.get(e.key);
+  if (d) return `${d.def.circuit}.${d.def.name}`;
+  return `${hex2(e.source)}→${hex2(e.target)} ${hex2(e.pb)}${hex2(e.sb)}${e.id ? ` ${e.id}` : ''}`;
 }
 
 function render(): void {
@@ -72,12 +93,15 @@ function render(): void {
   const detail = $('detail');
   const entry = selectedKey ? store.get(selectedKey) : undefined;
   detail.hidden = !entry;
-  // keep the detail panel stable while the pointer is over it (hover highlighting)
-  if (!detail.matches(':hover') || detail.dataset.key !== selectedKey) {
+  // keep the detail panel stable while the pointer is over it (hover
+  // highlighting) or while the user is typing a note
+  const editing = detail.contains(document.activeElement) && document.activeElement?.matches('input, textarea');
+  if (detail.dataset.key !== selectedKey || (!detail.matches(':hover') && !editing)) {
     detail.innerHTML = renderDetail(entry, ctx);
     detail.dataset.key = selectedKey ?? '';
   }
   $('btn-connect').textContent = client.state === 'disconnected' ? 'Connect' : 'Disconnect';
+  renderChartArea();
   if (defsDialog.open) $('defs-report').innerHTML = renderDefinitionsReport(defsState, localSources.map((l) => l.name));
 }
 
@@ -101,6 +125,7 @@ setInterval(scheduleRender, 5000); // keep "last seen" fresh
 const CAPTURE_KEY = 'capture';
 const DEVICES_KEY = 'devices';
 const LOCAL_DEFS_KEY = 'local-definitions';
+const ANNOTATIONS_KEY = 'annotations';
 const autosave = throttle(() => void kvSet(CAPTURE_KEY, store.toJSON()).catch(console.error), 3000);
 
 async function restore(): Promise<void> {
@@ -110,10 +135,15 @@ async function restore(): Promise<void> {
     const devices = await kvGet<ScanDevice[]>(DEVICES_KEY);
     if (devices?.length && !capture.status.devices.length) capture.status.devices = devices;
     localSources = (await kvGet<Array<{ name: string; text: string }>>(LOCAL_DEFS_KEY)) ?? [];
+    annotations.load(await kvGet(ANNOTATIONS_KEY));
   } catch (err) {
     console.warn('could not restore capture', err);
   }
   store.onChange(autosave);
+  annotations.onChange(() => {
+    void kvSet(ANNOTATIONS_KEY, annotations.toJSON()).catch(console.error);
+    scheduleRender();
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -284,7 +314,7 @@ $('btn-clear').addEventListener('click', () => {
 });
 
 $('btn-export').addEventListener('click', () => {
-  const data = { ...store.toJSON(), devices: capture.status.devices };
+  const data = { ...store.toJSON(), devices: capture.status.devices, annotations: annotations.toJSON() };
   const blob = new Blob([JSON.stringify(data, null, 1)], { type: 'application/json' });
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
@@ -306,8 +336,9 @@ fileInput.addEventListener('change', async () => {
     if (text.trimStart().startsWith('{')) {
       if (store.size && !confirm('Replace the current capture with the imported one?')) return;
       selectedKey = undefined;
-      const data = JSON.parse(text) as { devices?: ScanDevice[] };
+      const data = JSON.parse(text) as { devices?: ScanDevice[]; annotations?: unknown };
       store.load(data);
+      if (data.annotations) annotations.load(data.annotations, true);
       if (Array.isArray(data.devices) && data.devices.length && client.state !== 'connected') {
         capture.status.devices = data.devices;
         onDevices(data.devices);
@@ -330,6 +361,7 @@ $('rows').addEventListener('click', (ev) => {
   const row = (ev.target as HTMLElement).closest<HTMLTableRowElement>('tr[data-key]');
   if (!row) return;
   selectedKey = row.dataset.key === selectedKey ? undefined : row.dataset.key;
+  selection = undefined;
   scheduleRender();
 });
 
@@ -343,6 +375,33 @@ detailEl.addEventListener('click', (ev) => {
   else if (action === 'copy' && entry) {
     const text = entry.lastMasterHex + (entry.lastSlaveHex ? ` / ${entry.lastSlaveHex}` : '');
     void navigator.clipboard?.writeText(text);
+  } else if (entry) {
+    const el = (ev.target as HTMLElement).closest<HTMLElement>('[data-action]')!;
+    const part = el.dataset.p === 's' ? 's' : 'm';
+    switch (action) {
+      case 'select-byte': {
+        const offset = Number(el.dataset.i);
+        const same = selection?.key === entry.key && selection.part === part && selection.offset === offset;
+        selection = same ? undefined : { key: entry.key, part, offset };
+        break;
+      }
+      case 'plot-bytes':
+        addSeries({ kind: 'bytes', key: entry.key, part, offset: Number(el.dataset.i), type: el.dataset.type ?? 'UCH' });
+        break;
+      case 'plot-field':
+        addSeries({ kind: 'field', key: entry.key, field: el.dataset.field ?? '' });
+        break;
+      case 'save-note':
+        annotations.set(entry.key, {
+          note: ($('note-text') as HTMLTextAreaElement).value,
+          tags: parseTags(($('note-tags') as HTMLInputElement).value),
+        });
+        (document.activeElement as HTMLElement | null)?.blur();
+        break;
+      case 'toggle-ignore':
+        annotations.set(entry.key, { ignored: !annotations.isIgnored(entry.key) });
+        break;
+    }
   }
   detailEl.dataset.key = ''; // force re-render
   scheduleRender();
@@ -376,11 +435,140 @@ detailEl.addEventListener('mouseleave', () => {
 });
 
 document.addEventListener('keydown', (ev) => {
-  if (ev.key === 'Escape' && selectedKey && !dialog.open && !defsDialog.open) {
+  if (ev.key === 'Escape' && selectedKey && !dialog.open && !defsDialog.open && !findDialog.open) {
     selectedKey = undefined;
+    selection = undefined;
     scheduleRender();
   }
 });
+
+// ---------------------------------------------------------------------------
+// Charts (UNK-8, UNK-10)
+
+let chartModel: { layout: ChartLayout; series: SeriesData[] } | undefined;
+let chartHoverX: number | undefined;
+
+function addSeries(source: SeriesSource): void {
+  const id = seriesId(source);
+  if (!chartSources.some((s) => seriesId(s) === id)) chartSources = [...chartSources, source];
+  detailEl.dataset.key = '';
+  scheduleRender();
+}
+
+function renderChartArea(): void {
+  const el = $('chart');
+  const series: SeriesData[] = [];
+  for (const src of chartSources) {
+    const e = store.get(src.key);
+    if (e) series.push(buildSeries(e, src, (en, s) => decoding.decodeSample(en, s), messageName(e)));
+  }
+  el.hidden = series.length === 0;
+  if (!series.length) {
+    chartModel = undefined;
+    el.innerHTML = '';
+    return;
+  }
+  const layout = chartLayout(series, el.clientWidth - 2);
+  chartModel = { layout, series };
+  el.innerHTML = `<div class="chart-title"><b>Over time</b> <span class="muted small">${timestamp(layout.t0)} – ${timestamp(layout.t1)} · values hold until the next change</span><button type="button" class="small" data-action="clear-chart">Remove all</button></div>${renderChart(series, layout)}`;
+  if (chartHoverX !== undefined) showCrosshair(chartHoverX);
+}
+
+function showCrosshair(x: number): void {
+  const el = $('chart');
+  const line = el.querySelector<HTMLElement>('.crosshair');
+  const tip = el.querySelector<HTMLElement>('.chart-tip');
+  if (!chartModel || !line || !tip) return;
+  const { layout, series } = chartModel;
+  if (x < PLOT_LEFT || x > layout.width - 16) {
+    line.hidden = tip.hidden = true;
+    return;
+  }
+  const t = tFor(layout, x);
+  line.hidden = tip.hidden = false;
+  line.style.left = `${xFor(layout, t)}px`;
+  tip.innerHTML =
+    `<div class="muted">${timestamp(t)}</div>` +
+    series
+      .map((s) => {
+        const p = valueAt(s, t);
+        return `<div><span class="muted">${esc(s.label)}</span> <b>${p ? esc(p.text) : '–'}</b>${p && s.unit ? ` ${esc(s.unit)}` : ''}</div>`;
+      })
+      .join('');
+  const left = x + 16 + tip.offsetWidth > layout.width ? x - 16 - tip.offsetWidth : x + 16;
+  tip.style.left = `${Math.max(0, left)}px`;
+}
+
+const chartEl = $('chart');
+chartEl.addEventListener('mousemove', (ev) => {
+  const rect = chartEl.getBoundingClientRect();
+  chartHoverX = ev.clientX - rect.left - 1;
+  showCrosshair(chartHoverX);
+});
+chartEl.addEventListener('mouseleave', () => {
+  chartHoverX = undefined;
+  for (const el of chartEl.querySelectorAll<HTMLElement>('.crosshair, .chart-tip')) el.hidden = true;
+});
+chartEl.addEventListener('click', (ev) => {
+  const el = (ev.target as HTMLElement).closest<HTMLElement>('[data-action]');
+  if (el?.dataset.action === 'remove-series') chartSources = chartSources.filter((s) => seriesId(s) !== el.dataset.series);
+  else if (el?.dataset.action === 'clear-chart') chartSources = [];
+  else return;
+  detailEl.dataset.key = '';
+  scheduleRender();
+});
+window.addEventListener('resize', scheduleRender);
+
+// ---------------------------------------------------------------------------
+// Find a value (UNK-7)
+
+const findDialog = $('find') as HTMLDialogElement;
+$('btn-find').addEventListener('click', () => {
+  findDialog.showModal();
+  ($('find-value') as HTMLInputElement).focus();
+});
+$('find-close').addEventListener('click', () => findDialog.close());
+
+function renderFindResults(): void {
+  const byKey = new Map(store.entries().map((e) => [e.key, e]));
+  $('find-results').innerHTML = renderSearchResults(searchHits, byKey, messageName, new Set(chartSources.map(seriesId)));
+}
+
+$('find-form').addEventListener('submit', (ev) => {
+  ev.preventDefault();
+  const tolStr = ($('find-tol') as HTMLInputElement).value;
+  const query = parseQuery(($('find-value') as HTMLInputElement).value, tolStr ? Number(tolStr) : undefined);
+  if (!query) return;
+  const ctx = viewContext();
+  const onlyUnknown = ($('find-unknown') as HTMLInputElement).checked;
+  searchHits = searchValue(store.entries(), query, {
+    history: ($('find-history') as HTMLInputElement).checked,
+    filter: (e) => !annotations.isIgnored(e.key) && (!onlyUnknown || isKnown(e, ctx) !== true),
+  });
+  renderFindResults();
+});
+
+$('find-results').addEventListener('click', (ev) => {
+  const el = (ev.target as HTMLElement).closest<HTMLElement>('[data-action]');
+  const hit = searchHits[Number(el?.dataset.hit)];
+  if (!el || !hit) return;
+  if (el.dataset.action === 'plot-hit') {
+    addSeries({ kind: 'bytes', key: hit.key, part: hit.part, offset: hit.offset, type: hit.type });
+    renderFindResults();
+  } else if (el.dataset.action === 'show-hit') {
+    findDialog.close();
+    selectedKey = hit.key;
+    selection = { key: hit.key, part: hit.part, offset: hit.offset };
+    if (annotations.isIgnored(hit.key)) setFilter('ignored');
+    detailEl.dataset.key = '';
+    scheduleRender();
+  }
+});
+
+function setFilter(filter: FilterMode): void {
+  view.filter = filter;
+  for (const b of document.querySelectorAll<HTMLElement>('[data-filter]')) b.classList.toggle('active', b.dataset.filter === filter);
+}
 
 // ---------------------------------------------------------------------------
 // Start

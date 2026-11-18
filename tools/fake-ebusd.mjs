@@ -39,8 +39,8 @@ export function simulatedTelegrams(tick) {
     { m: '1008b5110101', s: `07${hex(Math.round(flow * 2))}3c${le(Math.round(outside * 256), 2)}646401`, c: 4 + tick, known: true },
     // ctlv2.DisplayedOutsideTemp: IGN:4 + EXP
     { m: '3115b524060200000073' + '00', s: `0800000000${float(outside)}`, c: 2 + tick, known: true },
-    // unknown: register with a changing byte
-    { m: '1008b509030d5501', s: `03${hex(65 + (tick % 4))}0001`, c: 2 + tick, known: false },
+    // unknown: register that carries the outside temperature as D2C at response offset 1
+    { m: '1008b509030d5501', s: `0401${le(Math.round(outside * 16), 2)}81`, c: 2 + tick, known: false },
   ];
   // a new message type shows up after a few polls
   if (tick >= 3) lines.push({ m: '10f1b5050427000000', s: null, c: tick - 2, known: false });

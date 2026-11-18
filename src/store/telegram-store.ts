@@ -43,7 +43,7 @@ export interface Entry {
   lengthMismatch?: boolean;
 }
 
-export const HISTORY_LIMIT = 200;
+export const HISTORY_LIMIT = 1000;
 
 export interface IngestOptions {
   /** Observation time (ms since epoch). */

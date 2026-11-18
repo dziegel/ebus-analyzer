@@ -199,7 +199,7 @@ export interface DecodedField {
 }
 
 /** Reads one field's value from `data` at `offset` (the readSymbols part). */
-function readValue(f: FieldDef, data: Uint8Array, offset: number, length: number): ReadResult {
+export function readValue(f: FieldDef, data: Uint8Array, offset: number, length: number): ReadResult {
   const t = f.type;
   if (f.values && t.kind === 'num') {
     const raw = readRawNumber(t, data, offset, length);
