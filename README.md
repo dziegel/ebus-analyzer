@@ -126,10 +126,10 @@ type stripping.
 
 ## License
 
-Apache-2.0. Message definitions from ebusd-configuration (GPL-3.0) are loaded at
-runtime and are not part of this repository, nor is ebusd's test data.
+GPL-3.0 (see [LICENSE](LICENSE)), the same license as
+[ebusd](https://github.com/john30/ebusd) and
+[ebusd-configuration](https://github.com/john30/ebusd-configuration).
 
-Note: the decoder in `src/defs/datatypes.ts` and `src/defs/fields.ts` is a
-TypeScript port that closely follows ebusd's `datatype.cpp` and `data.cpp`
-(GPL-3.0). Whether this makes these files a derivative work, and therefore
-requires GPL-3.0 for the project, is still open (see Q6 in the requirements).
+The decoder in `src/defs/` is a TypeScript port that closely follows ebusd's
+`datatype.cpp` and `data.cpp`. Message definitions are loaded at runtime from
+[ebus.github.io](https://ebus.github.io/) and are not part of this repository.
