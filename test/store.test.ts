@@ -102,6 +102,6 @@ test('view filters, searches and sorts with new entries first', () => {
     applyView(all, { filter: 'all', sort: 'count', search: 'b5 16' }).map((e) => e.key),
     ['10feb51600'],
   );
-  const named = applyView(all, { filter: 'all', sort: 'count', search: 'hmu00' }, (a) => (a === 0x08 ? 'HMU00' : undefined));
+  const named = applyView(all, { filter: 'all', sort: 'count', search: 'hmu00' }, { deviceName: (a) => (a === 0x08 ? 'HMU00' : undefined) });
   assert.equal(named.length, 2);
 });

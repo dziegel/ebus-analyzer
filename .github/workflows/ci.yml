@@ -15,5 +15,11 @@ jobs:
           node-version: 22
       - run: npm install
       - run: npm run typecheck
+      # reference data for the decoder tests (not part of this repository)
+      - run: git clone --depth 1 https://github.com/john30/ebusd ../ebusd
+      - run: git clone --depth 1 https://github.com/eBUS/ebus.github.io ../ebus.github.io
       - run: npm test
+        env:
+          EBUSD_SRC: ../ebusd
+          EBUS_CDN: ../ebus.github.io
       - run: npm run build

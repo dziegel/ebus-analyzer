@@ -111,7 +111,8 @@ th { font-size: 12px; font-weight: 600; color: var(--muted); position: sticky; t
 .c-num { text-align: right; white-space: nowrap; }
 .c-status { white-space: nowrap; width: 1%; }
 .c-src, .c-dst, .c-cmd, .c-id { white-space: nowrap; }
-.c-data, .c-slave { word-break: break-all; }
+.c-data, .c-slave { min-width: 13ch; }
+.c-data .b, .c-slave .b, .history .b { display: inline-block; }
 
 .telegrams tbody tr { cursor: pointer; }
 .telegrams tbody tr:hover { background: var(--accent-soft); }
@@ -145,7 +146,7 @@ th { font-size: 12px; font-weight: 600; color: var(--muted); position: sticky; t
 .facts dt { color: var(--muted); }
 .facts dd { margin: 0; }
 .detail-actions { display: flex; gap: 6px; }
-.history td { padding: 3px 6px; word-break: break-all; }
+.history td { padding: 3px 6px; }
 .history th { position: static; }
 
 /* Settings dialog */
@@ -175,3 +176,35 @@ dialog .hint { font-size: 12px; color: var(--muted); margin: 6px 0 0; }
     position: fixed; inset: 0; max-width: none; border-radius: 0; z-index: 10; border: 0;
   }
 }
+
+/* Decoding (M2) */
+.c-msg { min-width: 160px; }
+.c-msg b { font-weight: 600; }
+.telegrams tr.is-known td.c-msg b { color: var(--text); }
+.warn-text { color: var(--warn); }
+.error-text { color: var(--new); }
+.device.defs { cursor: pointer; font: inherit; font-size: 12px; color: var(--accent); border-color: var(--accent); }
+.device.defs.warn { color: var(--warn); border-color: var(--warn); }
+
+.telegram { line-height: 1.9; word-break: break-all; margin: 10px 0 4px; }
+.telegram .b { padding: 1px 2px; }
+.telegram .b.hdr { color: var(--muted); }
+.telegram .sep { color: var(--muted); }
+.b.hl, .telegram .b.hl { background: var(--accent); color: #fff; }
+
+.fields td { padding: 4px 6px; vertical-align: top; }
+.fields th { position: static; }
+.fields tr.field { cursor: default; }
+.fields tr.field.hl { background: var(--accent-soft); }
+.fields tr.ignored td { color: var(--muted); }
+.fields tr.bad td { color: var(--warn); }
+
+dialog.wide { width: min(820px, 94vw); }
+dialog .row { display: flex; flex-wrap: wrap; gap: 12px; }
+dialog .row label:first-child { flex: 1 1 260px; }
+.dialog-actions.left { justify-content: flex-start; flex-wrap: wrap; }
+.defs-report { margin-top: 14px; max-height: 45vh; overflow: auto; }
+.defs-files td, .defs-files th { padding: 4px 8px; font-size: 13px; }
+.defs-files th { position: static; }
+.defs-report pre { white-space: pre-wrap; }
+a { color: var(--accent); }

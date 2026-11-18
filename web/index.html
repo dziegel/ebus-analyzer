@@ -37,6 +37,7 @@
         </select>
       </label>
       <div class="toolbar-actions">
+        <button type="button" id="btn-defs">Definitions</button>
         <button type="button" id="btn-seen">Mark all seen</button>
         <button type="button" id="btn-import">Import</button>
         <button type="button" id="btn-export">Export</button>
@@ -57,6 +58,7 @@
               <th>To</th>
               <th>PB SB</th>
               <th>ID</th>
+              <th>Message</th>
               <th>Data</th>
               <th>Response</th>
               <th class="c-num">Count · interval</th>
@@ -68,6 +70,43 @@
       </div>
       <aside id="detail" class="detail" hidden></aside>
     </main>
+
+    <dialog id="definitions" class="wide">
+      <form method="dialog">
+        <h2>Message definitions</h2>
+        <p class="hint">
+          Definitions come from <a href="https://github.com/john30/ebusd-configuration" target="_blank" rel="noopener">ebusd-configuration</a>,
+          converted to CSV and served on the same CDN ebusd uses. Files are picked per device like ebusd does.
+        </p>
+        <div class="row">
+          <label>Source
+            <input id="defs-url" type="url" required />
+          </label>
+          <label>Release
+            <select id="defs-channel">
+              <option value="">current</option>
+              <option value="next/">next</option>
+            </select>
+          </label>
+          <label>Language
+            <select id="defs-lang">
+              <option value="en">English</option>
+              <option value="de">Deutsch</option>
+            </select>
+          </label>
+        </div>
+        <div class="dialog-actions left">
+          <button type="button" id="defs-reload" class="primary">Save and reload</button>
+          <button type="button" id="defs-add-local">Add local CSV files…</button>
+          <button type="button" id="defs-clear-local">Remove local files</button>
+          <input id="defs-local-file" type="file" accept=".csv,.inc,text/csv" multiple hidden />
+        </div>
+        <div id="defs-report" class="defs-report"></div>
+        <div class="dialog-actions">
+          <button value="close">Close</button>
+        </div>
+      </form>
+    </dialog>
 
     <dialog id="settings">
       <form method="dialog">

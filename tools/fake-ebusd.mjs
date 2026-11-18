@@ -9,21 +9,38 @@ import { createServer } from 'node:net';
 import { pathToFileURL } from 'node:url';
 
 const hex = (n, bytes = 1) => n.toString(16).padStart(bytes * 2, '0');
+/** Little-endian hex of an integer. */
+const le = (n, bytes) => Array.from({ length: bytes }, (_, i) => hex((n >> (8 * i)) & 0xff)).join('');
+/** BCD byte. */
+const bcd = (n) => hex(Math.floor(n / 10) * 16 + (n % 10));
+/** IEEE 754 float, little-endian hex. */
+const float = (v) => {
+  const b = Buffer.alloc(4);
+  b.writeFloatLE(v);
+  return b.toString('hex');
+};
 
-/** Builds the simulated telegram list for poll number `tick`. */
+/**
+ * Builds the simulated telegram list for poll number `tick`. The known
+ * messages follow real Vaillant definitions (08.hmu, 15.ctlv2, broadcast).
+ */
 export function simulatedTelegrams(tick) {
-  const flow = 350 + Math.round(20 * Math.sin(tick / 3)); // 35.0 °C ± 2, D2C-like /16 not needed
-  const outside = (65 + (tick % 4)) & 0xff;
+  const flow = 35 + 2 * Math.sin(tick / 3); // °C
+  const outside = 5.5 + (tick % 4) * 0.5; // °C
   const sec = tick % 60;
   const lines = [
-    // known: date/time broadcast from the controller
-    { m: `10feb5160800${hex(sec)}2014170311` + '25', s: null, c: 10 + tick, known: true },
-    // known: HMU register read with slowly changing value
-    { m: '1008b509030d0f00', s: `02${hex(flow & 0xff)}${hex(flow >> 8)}`, c: 5 + tick, known: true },
-    // unknown: register with changing outside temperature byte
-    { m: '1008b509030d5501', s: `03${hex(outside)}0001`, c: 2 + tick, known: false },
-    // unknown: constant status message
-    { m: '1076b5110101', s: '0909d90113000008000100', c: 1 + Math.floor(tick / 2), known: false },
+    // Broadcast.Vdatetime: BTI (ss mm hh) + BDA (dd mm weekday yy)
+    { m: `10feb5160800${bcd(sec)}3014181103` + '26', s: null, c: 10 + tick, known: true },
+    // Broadcast.Outsidetemp: D2B
+    { m: `10feb5160301${le(Math.round(outside * 256), 2)}`, s: null, c: 3 + tick, known: true },
+    // hmu.FlowTemp: IGN:3 + D2C
+    { m: '3108b51a0405ff3220', s: `05000000${le(Math.round(flow * 16), 2)}`, c: 5 + tick, known: true },
+    // hmu.Status01: D1C D1C D2B D1C D1C UCH
+    { m: '1008b5110101', s: `07${hex(Math.round(flow * 2))}3c${le(Math.round(outside * 256), 2)}646401`, c: 4 + tick, known: true },
+    // ctlv2.DisplayedOutsideTemp: IGN:4 + EXP
+    { m: '3115b524060200000073' + '00', s: `0800000000${float(outside)}`, c: 2 + tick, known: true },
+    // unknown: register with a changing byte
+    { m: '1008b509030d5501', s: `03${hex(65 + (tick % 4))}0001`, c: 2 + tick, known: false },
   ];
   // a new message type shows up after a few polls
   if (tick >= 3) lines.push({ m: '10f1b5050427000000', s: null, c: tick - 2, known: false });

@@ -1,3 +1,4 @@
+import type { Decoded } from '../defs/repository.ts';
 import type { Entry } from '../store/telegram-store.ts';
 import { hex2 } from './format.ts';
 
@@ -10,8 +11,23 @@ export interface ViewState {
   search: string;
 }
 
-/** Text the search box matches against: addresses, PB SB, ID, data, info, device names. */
-function searchText(e: Entry, deviceName: (addr: number) => string | undefined): string {
+export interface ViewContext {
+  deviceName?: (addr: number) => string | undefined;
+  /** Decoding result of an entry, when definitions are loaded. */
+  decoded?: (e: Entry) => Decoded | undefined;
+  /** True when definitions are loaded: "known" then means "decoded by the app". */
+  definitionsLoaded?: boolean;
+}
+
+/** Whether a message is known: decoded by the loaded definitions, else ebusd's flag. */
+export function isKnown(e: Entry, ctx: ViewContext): boolean | undefined {
+  if (ctx.definitionsLoaded) return ctx.decoded?.(e) !== undefined;
+  return e.known;
+}
+
+/** Text the search box matches against: addresses, PB SB, ID, data, info, device and message names. */
+function searchText(e: Entry, ctx: ViewContext): string {
+  const d = ctx.decoded?.(e);
   return [
     hex2(e.source),
     hex2(e.target),
@@ -21,26 +37,23 @@ function searchText(e: Entry, deviceName: (addr: number) => string | undefined):
     e.lastMasterHex,
     e.lastSlaveHex,
     e.info ?? '',
-    deviceName(e.source) ?? '',
-    deviceName(e.target) ?? '',
+    ctx.deviceName?.(e.source) ?? '',
+    ctx.deviceName?.(e.target) ?? '',
     e.kind,
+    d ? `${d.def.circuit}.${d.def.name} ${d.def.comment ?? ''}` : '',
   ]
     .join(' ')
     .toLowerCase();
 }
 
 /** Applies filter, search and sort (UI-2, UNK-2..4). */
-export function applyView(
-  entries: readonly Entry[],
-  view: ViewState,
-  deviceName: (addr: number) => string | undefined = () => undefined,
-): Entry[] {
+export function applyView(entries: readonly Entry[], view: ViewState, ctx: ViewContext = {}): Entry[] {
   const terms = view.search.toLowerCase().split(/\s+/).filter(Boolean);
   const filtered = entries.filter((e) => {
-    if (view.filter === 'unknown' && e.known === true) return false;
+    if (view.filter === 'unknown' && isKnown(e, ctx) === true) return false;
     if (view.filter === 'new' && !e.isNew) return false;
     if (terms.length) {
-      const text = searchText(e, deviceName);
+      const text = searchText(e, ctx);
       if (!terms.every((t) => text.includes(t))) return false;
     }
     return true;
