@@ -4,6 +4,7 @@ Browser tool that simplifies reverse engineering of eBUS traffic using
 [ebusd](https://github.com/john30/ebusd).
 
 - Shows all telegrams ebusd sees, grouped by message, with frequency and history
+- Filters by bus participant: one button per device (and per other address seen)
 - Highlights new and unknown telegrams and the bytes that change
 - Decodes telegrams with the definitions from
   [ebusd-configuration](https://github.com/john30/ebusd-configuration)
@@ -50,6 +51,20 @@ TypeSpec sources of ebusd-configuration. One file is picked per device
 
 The decoder is a port of ebusd's data types and field handling and is checked
 against ebusd's own test vectors (see Development).
+
+## Filtering by bus participant
+
+Above the list, every bus participant is a button: the devices from ebusd's
+scan result (address, manufacturer, device ID, SW/HW version) and, with a
+dashed border, all other addresses seen in the traffic (e.g. ebusd itself).
+The number on a button is the count of messages from/to that participant.
+
+Pressing a button shows only telegrams from or to that participant; pressing
+it again or pressing *All* shows everything. The filter combines with the
+other filters and the search. Following the eBUS convention, a participant
+comprises its slave address and the master address 5 below it, so the
+controller at 15 also covers telegrams sent from 10. Broadcasts count only
+for their sender.
 
 ## Analysing unknown messages
 

@@ -18,7 +18,7 @@ import {
   type DefinitionsState,
   type DetailContext,
 } from './ui/render.ts';
-import { applyView, isKnown, type FilterMode, type SortMode, type ViewState } from './ui/view.ts';
+import { applyView, isKnown, participants, type FilterMode, type SortMode, type ViewState } from './ui/view.ts';
 import { AnnotationStore, parseTags } from './store/annotations.ts';
 import { parseQuery, searchValue, type SearchHit } from './analysis/search.ts';
 import { buildSeries, seriesId, valueAt, type SeriesData, type SeriesSource } from './analysis/series.ts';
@@ -113,8 +113,12 @@ function render(): void {
   const ctx = viewContext();
   const shown = applyView(all, view, ctx);
   $('status').innerHTML = renderStatus(client.state, capture.status, stateDetail);
-  $('devices').innerHTML = renderDevices(capture.status.devices, defsState, localSources.length);
-  $('counts').innerHTML = renderCounts(all, shown.length, ctx);
+  const parts = participants(all, capture.status.devices);
+  if (view.participant !== undefined && !parts.some((p) => p.key === view.participant)) view.participant = undefined;
+  $('devices').innerHTML = renderDevices(capture.status.devices, defsState, localSources.length, parts, view.participant);
+  const selectedPart = parts.find((p) => p.key === view.participant);
+  const partName = selectedPart ? `${selectedPart.addresses.map(hex2).join('/') || hex2(selectedPart.key)}${selectedPart.device ? ` ${selectedPart.device.deviceId}` : ''}` : undefined;
+  $('counts').innerHTML = renderCounts(all, shown.length, ctx, partName);
   $('rows').innerHTML = renderRows(shown, ctx, selectedKey);
   const detail = $('detail');
   const entry = selectedKey ? store.get(selectedKey) : undefined;
@@ -258,7 +262,14 @@ function openDefinitions(): void {
 }
 $('btn-defs').addEventListener('click', openDefinitions);
 $('devices').addEventListener('click', (ev) => {
-  if ((ev.target as HTMLElement).closest('[data-action="definitions"]')) openDefinitions();
+  const target = ev.target as HTMLElement;
+  if (target.closest('[data-action="definitions"]')) return openDefinitions();
+  // participant filter: one at a time, pressing it again (or "All") shows all
+  const btn = target.closest<HTMLElement>('[data-participant]');
+  if (!btn) return;
+  const key = btn.dataset.participant === '' ? undefined : Number(btn.dataset.participant);
+  view.participant = key === view.participant ? undefined : key;
+  scheduleRender();
 });
 $('defs-reload').addEventListener('click', () => {
   const url = ($('defs-url') as HTMLInputElement).value.trim();

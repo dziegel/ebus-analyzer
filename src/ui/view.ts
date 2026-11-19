@@ -1,4 +1,6 @@
 import type { Decoded } from '../defs/repository.ts';
+import { BROADCAST, isMaster } from '../ebus/address.ts';
+import type { ScanDevice } from '../ebusd/protocol.ts';
 import type { AnnotationStore } from '../store/annotations.ts';
 import type { Entry } from '../store/telegram-store.ts';
 import { hex2 } from './format.ts';
@@ -11,6 +13,56 @@ export interface ViewState {
   filter: FilterMode;
   sort: SortMode;
   search: string;
+  /** Show only telegrams from/to this bus participant (see participantKey). */
+  participant?: number;
+}
+
+/**
+ * Key of the participant an address belongs to: a master address belongs to
+ * the participant with the slave address master + 5 (eBUS convention), so a
+ * device is one participant with both of its addresses.
+ */
+export function participantKey(address: number): number {
+  return isMaster(address) ? (address + 5) & 0xff : address;
+}
+
+/** True if the telegram is from or to the participant. */
+export function involves(e: Entry, participant: number): boolean {
+  return participantKey(e.source) === participant || (e.target !== BROADCAST && participantKey(e.target) === participant);
+}
+
+export interface Participant {
+  /** participantKey, used as filter value. */
+  key: number;
+  /** Addresses seen in the traffic (master and/or slave). */
+  addresses: number[];
+  device?: ScanDevice;
+  /** Number of messages from/to this participant. */
+  messages: number;
+}
+
+/** Bus participants: the scanned devices plus all other addresses seen in the traffic. */
+export function participants(entries: readonly Entry[], devices: readonly ScanDevice[]): Participant[] {
+  const map = new Map<number, Participant>();
+  const get = (key: number) => {
+    let p = map.get(key);
+    if (!p) map.set(key, (p = { key, addresses: [], messages: 0 }));
+    return p;
+  };
+  for (const d of devices) get(participantKey(d.address)).device = d;
+  for (const e of entries) {
+    for (const a of [e.source, e.target]) {
+      if (a === BROADCAST) continue;
+      const p = get(participantKey(a));
+      if (!p.addresses.includes(a)) p.addresses.push(a);
+    }
+  }
+  for (const p of map.values()) {
+    p.addresses.sort((a, b) => a - b);
+    p.messages = entries.filter((e) => involves(e, p.key)).length;
+  }
+  // scanned devices first (by address), then the others
+  return [...map.values()].sort((a, b) => Number(!!b.device) - Number(!!a.device) || a.key - b.key);
 }
 
 export interface ViewContext {
@@ -59,6 +111,7 @@ export function applyView(entries: readonly Entry[], view: ViewState, ctx: ViewC
     if (ignored !== (view.filter === 'ignored')) return false;
     if (view.filter === 'unknown' && isKnown(e, ctx) === true) return false;
     if (view.filter === 'new' && !e.isNew) return false;
+    if (view.participant !== undefined && !involves(e, view.participant)) return false;
     if (terms.length) {
       const text = searchText(e, ctx);
       if (!terms.every((t) => text.includes(t))) return false;

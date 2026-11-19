@@ -1,6 +1,6 @@
 # EBus Analyzer – Requirements
 
-Status: Draft · Last updated: 2026-11-18 · Implemented: M1, M2, M3, M4
+Status: Draft · Last updated: 2026-11-19 · Implemented: M1, M2, M3, M4, UI-5
 
 EBus Analyzer is a browser application that receives eBUS telegrams from
 [ebusd](https://github.com/john30/ebusd), decodes them using the message
@@ -162,6 +162,7 @@ the TCP command port therefore needs a bridge (see ARCH-2 and open question Q1).
 | UI-2 | M | Filter and full-text search over address, device, message name and hex data. |
 | UI-3 | S | Light and dark theme. |
 | UI-4 | S | UI language English; German as second language. |
+| UI-5 | M | The bus participants are shown as buttons: the scanned devices plus all other addresses seen in the traffic. Pressing one shows only telegrams from/to this participant; pressing it again (or "All") shows all. A participant comprises its slave address and the associated master address (slave − 5), e.g. 10/15 for the controller. Broadcasts count as "from" their sender only. |
 
 ---
 

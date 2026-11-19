@@ -8,7 +8,7 @@ import type { LoadReport } from '../defs/loader.ts';
 import type { Telegram } from '../ebus/telegram.ts';
 import type { Entry } from '../store/telegram-store.ts';
 import { ago, bytesHtml, dateTime, duration, esc, hex2, timestamp, varyingBytes } from './format.ts';
-import { isKnown, type ViewContext } from './view.ts';
+import { isKnown, type Participant, type ViewContext } from './view.ts';
 import { renderByteAnalysis, renderNotes, type ByteSelection } from './analysis.ts';
 import { seriesId } from '../analysis/series.ts';
 
@@ -47,12 +47,36 @@ export type DefinitionsState =
   | { state: 'ready'; report: LoadReport; messages: number; at: number }
   | { state: 'error'; error: string };
 
-export function renderDevices(devices: readonly ScanDevice[], defs: DefinitionsState, localFiles: number): string {
-  const chips = devices.map(
-    (d) =>
-      `<span class="device" title="${esc(d.manufacturer)} ${esc(d.deviceId)} SW ${esc(d.sw)} HW ${esc(d.hw)}">` +
-      `<b>${hex2(d.address)}</b> ${esc(d.manufacturer)} ${esc(d.deviceId)} <span class="muted">SW${esc(d.sw)} HW${esc(d.hw)}</span></span>`,
-  );
+/** Addresses of a participant as "10/15" (master/slave) or a single address. */
+function addressLabel(p: Participant): string {
+  const addrs = p.addresses.length ? p.addresses : p.device ? [p.device.address] : [p.key];
+  return addrs.map(hex2).join('/');
+}
+
+export function renderDevices(
+  devices: readonly ScanDevice[],
+  defs: DefinitionsState,
+  localFiles: number,
+  parts: readonly Participant[] = [],
+  selected?: number,
+): string {
+  const chips: string[] = [];
+  if (parts.length) {
+    chips.push(`<button type="button" class="device participant${selected === undefined ? ' active' : ''}" data-participant="" title="Show telegrams of all participants">All</button>`);
+  }
+  for (const p of parts) {
+    const d = p.device;
+    const title = d
+      ? `${d.manufacturer} ${d.deviceId} SW ${d.sw} HW ${d.hw} · ${p.messages} messages from/to ${addressLabel(p)}`
+      : `${p.messages} messages from/to ${addressLabel(p)} (not in the scan result)`;
+    const label = d
+      ? `<b>${addressLabel(p)}</b> ${esc(d.manufacturer)} ${esc(d.deviceId)} <span class="muted">SW${esc(d.sw)} HW${esc(d.hw)}</span>`
+      : `<b>${addressLabel(p)}</b>`;
+    chips.push(
+      `<button type="button" class="device participant${selected === p.key ? ' active' : ''}${d ? '' : ' unscanned'}" data-participant="${p.key}" aria-pressed="${selected === p.key}" title="${esc(title)}">` +
+        `${label} <span class="count">${p.messages}</span></button>`,
+    );
+  }
   let text: string;
   let cls = '';
   switch (defs.state) {
@@ -108,12 +132,12 @@ export function renderDefinitionsReport(defs: DefinitionsState, localNames: read
 // ---------------------------------------------------------------------------
 // Telegram list
 
-export function renderCounts(all: readonly Entry[], shown: number, ctx: ViewContext): string {
+export function renderCounts(all: readonly Entry[], shown: number, ctx: ViewContext, participant?: string): string {
   const newCount = all.filter((e) => e.isNew).length;
   const unknown = all.filter((e) => isKnown(e, ctx) === false).length;
   const decoded = ctx.definitionsLoaded ? ` · ${all.length - unknown} decoded` : '';
   const ignored = ctx.annotations ? all.filter((e) => ctx.annotations!.isIgnored(e.key)).length : 0;
-  return `${shown} of ${all.length} messages · <span class="new-text">${newCount} new</span> · ${unknown} unknown${decoded}${ignored ? ` · ${ignored} ignored` : ''}`;
+  return `${shown} of ${all.length} messages${participant ? ` (from/to ${esc(participant)})` : ''} · <span class="new-text">${newCount} new</span> · ${unknown} unknown${decoded}${ignored ? ` · ${ignored} ignored` : ''}`;
 }
 
 function knownBadge(e: Entry, ctx: ViewContext): string {
