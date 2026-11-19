@@ -2,24 +2,41 @@ name: CI
 
 on:
   push:
-    branches: [main]
   pull_request:
 
 jobs:
   build:
     runs-on: ubuntu-latest
+    env:
+      REQUIRE_TSP: '1'
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 22
       - run: npm install
+      - run: npm ls @typespec/compiler @ebusd/ebus-typespec || true
       - run: npm run typecheck
-      # reference data for the decoder tests (not part of this repository)
+      - run: npm run typecheck:tsp
+      # reference data for the decoder and TypeSpec tests (not part of this repository)
       - run: git clone --depth 1 https://github.com/john30/ebusd ../ebusd
       - run: git clone --depth 1 https://github.com/eBUS/ebus.github.io ../ebus.github.io
+      # the ebusd-configuration revision the CDN files were generated from
+      - run: git clone --depth 1 --branch main20260201 https://github.com/john30/ebusd-configuration ../ebusd-configuration
       - run: npm test
         env:
           EBUSD_SRC: ../ebusd
           EBUS_CDN: ../ebus.github.io
+          EBUSD_CONFIG: ../ebusd-configuration
       - run: npm run build
+      - name: Browser end-to-end test
+        run: |
+          npm install --no-save playwright
+          npx playwright install --with-deps chromium
+          node test/e2e/browser.mjs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: e2e-screenshots
+          path: e2e-artifacts
+          if-no-files-found: ignore

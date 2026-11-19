@@ -254,7 +254,7 @@ function renderDecoded(d: Decoded, t: Telegram | undefined, entryKey: string, ch
     <h3>${esc(def.circuit)}.${esc(def.name)}</h3>
     ${def.comment ? `<p class="small">${esc(def.comment)}</p>` : ''}
     <p class="small">${facts}</p>
-    <p class="small muted">Definition: ${source}${tsp}</p>
+    <p class="small muted">Definition: ${source}${tsp} · <button type="button" class="small" data-action="show-tsp">TypeSpec</button></p>
     ${body}`;
 }
 

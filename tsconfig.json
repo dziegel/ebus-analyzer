@@ -3,7 +3,12 @@
     "target": "es2022",
     "module": "esnext",
     "moduleResolution": "bundler",
-    "lib": ["es2023", "dom", "dom.iterable"],
+    "lib": [
+      "es2023",
+      "dom",
+      "dom.iterable",
+      "dom.asynciterable"
+    ],
     "rootDir": "src",
     "outDir": "web/dist",
     "sourceMap": true,
@@ -16,5 +21,12 @@
     "rewriteRelativeImportExtensions": true,
     "skipLibCheck": true
   },
-  "include": ["src"]
+  "include": [
+    "src"
+  ],
+  "exclude": [
+    "src/tsp/compile.ts",
+    "src/tsp/worker.ts",
+    "src/tsp/*.generated.js"
+  ]
 }

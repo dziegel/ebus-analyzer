@@ -9,14 +9,21 @@
     "node": ">=22.18"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "tsc -p tsconfig.json && node scripts/build-tsp.mjs",
+    "build:app": "tsc -p tsconfig.json",
+    "build:tsp": "node scripts/build-tsp.mjs",
     "watch": "tsc -p tsconfig.json --watch",
     "typecheck": "tsc -p tsconfig.json --noEmit",
+    "typecheck:tsp": "tsc -p tsconfig.tsp.json",
     "test": "node --test \"test/**/*.test.ts\"",
     "start": "node bridge/ebusd-bridge.mjs",
     "dev": "npm run build && node bridge/ebusd-bridge.mjs --ebusd-host 127.0.0.1"
   },
   "devDependencies": {
+    "@ebusd/ebus-typespec": "~0.31.0",
+    "@typespec/compiler": "~1.17.0",
+    "esbuild": "^0.25.0",
+    "path-browserify": "^1.0.1",
     "typescript": "^5.8.0"
   }
 }

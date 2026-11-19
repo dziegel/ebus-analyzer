@@ -40,6 +40,7 @@
       <div class="toolbar-actions">
         <button type="button" id="btn-find">Find value</button>
         <button type="button" id="btn-defs">Definitions</button>
+        <button type="button" id="btn-tsp">TypeSpec</button>
         <button type="button" id="btn-seen">Mark all seen</button>
         <button type="button" id="btn-import">Import</button>
         <button type="button" id="btn-export">Export</button>
@@ -110,6 +111,55 @@
           <button value="close">Close</button>
         </div>
       </form>
+    </dialog>
+
+    <dialog id="tsp" class="full">
+      <div class="tsp-head">
+        <h2>TypeSpec project</h2>
+        <span id="tsp-project" class="muted small"></span>
+        <div class="tsp-actions">
+          <button type="button" id="tsp-open">Open folder…</button>
+          <input id="tsp-dir" type="file" webkitdirectory multiple hidden />
+          <button type="button" id="tsp-save" title="Write changed files back to the folder">Save to folder</button>
+          <button type="button" id="tsp-zip">Download sources</button>
+          <button type="button" id="tsp-close">Close</button>
+        </div>
+      </div>
+      <div class="tsp-compile">
+        <label>Entry <select id="tsp-entry"></select></label>
+        <label>Language <select id="tsp-lang"><option value="en">English</option><option value="de">Deutsch</option></select></label>
+        <button type="button" id="tsp-run" class="primary">Compile</button>
+        <label class="check"><input id="tsp-use" type="checkbox" checked /> Use compiled definitions for decoding</label>
+        <button type="button" id="tsp-csv">Download CSV</button>
+        <span id="tsp-status" class="small" aria-live="polite"></span>
+      </div>
+      <div class="tsp-body">
+        <div class="tsp-side">
+          <div id="tsp-diags" class="tsp-diags"></div>
+          <input id="tsp-filter" type="search" placeholder="Filter files…" aria-label="Filter files" />
+          <div id="tsp-files" class="tsp-files"></div>
+        </div>
+        <div class="tsp-editor">
+          <div class="tsp-editor-head">
+            <span id="tsp-file" class="mono"></span>
+            <span id="tsp-pos" class="muted small"></span>
+            <button type="button" id="tsp-file-save" class="small">Apply changes</button>
+            <button type="button" id="tsp-file-revert" class="small">Revert</button>
+          </div>
+          <textarea id="tsp-text" spellcheck="false" wrap="off" aria-label="File content"></textarea>
+        </div>
+      </div>
+    </dialog>
+
+    <dialog id="tsp-view" class="wide">
+      <h2>TypeSpec for <span id="tsp-view-name" class="mono"></span></h2>
+      <p class="hint">Generated from the CSV definition. Conditions and chained IDs are kept as comments.</p>
+      <textarea id="tsp-view-text" class="tsp-view-text" spellcheck="false" wrap="off" readonly></textarea>
+      <div class="dialog-actions">
+        <button type="button" id="tsp-view-copy">Copy</button>
+        <button type="button" id="tsp-view-add">Add to TypeSpec project</button>
+        <button type="button" id="tsp-view-close">Close</button>
+      </div>
     </dialog>
 
     <dialog id="find" class="wide">

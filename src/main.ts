@@ -25,6 +25,25 @@ import { buildSeries, seriesId, valueAt, type SeriesData, type SeriesSource } fr
 import { chartLayout, renderChart, tFor, xFor, PLOT_LEFT, type ChartLayout } from './ui/chart.ts';
 import { renderSearchResults, type ByteSelection } from './ui/analysis.ts';
 import { esc, hex2, timestamp } from './ui/format.ts';
+import { TspCompiler } from './tsp/client.ts';
+import type { CompileResult, TspDiagnostic } from './tsp/protocol.ts';
+import {
+  canPickDirectory,
+  defaultEntry,
+  ensureWritable,
+  fromStored,
+  pickDirectory,
+  readDirectory,
+  readFileList,
+  toStored,
+  translationFile,
+  writeFiles,
+  type ProjectData,
+} from './tsp/project.ts';
+import { selectCompiled } from './tsp/outputs.ts';
+import { suggestFileName, writeTypeSpec } from './tsp/writer.ts';
+import { createZip } from './util/zip.ts';
+import { offsetOf, positionOf, renderDiagnostics, renderFiles, sortedDiagnostics } from './ui/typespec.ts';
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 
@@ -46,6 +65,13 @@ let localSources: Array<{ name: string; text: string }> = [];
 let selection: ByteSelection | undefined;
 let chartSources: SeriesSource[] = [];
 let searchHits: SearchHit[] = [];
+let tspProject: ProjectData | undefined;
+let tspHandle: FileSystemDirectoryHandle | undefined;
+/** CSV files of the last successful compilation (used for decoding). */
+let tspCsv: Record<string, string> | undefined;
+/** Entry file of the last successful compilation. */
+let tspCompiledEntry: string | undefined;
+let tspUse = true;
 
 // ---------------------------------------------------------------------------
 // Rendering
@@ -126,6 +152,9 @@ const CAPTURE_KEY = 'capture';
 const DEVICES_KEY = 'devices';
 const LOCAL_DEFS_KEY = 'local-definitions';
 const ANNOTATIONS_KEY = 'annotations';
+const TSP_PROJECT_KEY = 'tsp-project';
+const TSP_HANDLE_KEY = 'tsp-handle';
+const TSP_CSV_KEY = 'tsp-csv';
 const autosave = throttle(() => void kvSet(CAPTURE_KEY, store.toJSON()).catch(console.error), 3000);
 
 async function restore(): Promise<void> {
@@ -136,6 +165,13 @@ async function restore(): Promise<void> {
     if (devices?.length && !capture.status.devices.length) capture.status.devices = devices;
     localSources = (await kvGet<Array<{ name: string; text: string }>>(LOCAL_DEFS_KEY)) ?? [];
     annotations.load(await kvGet(ANNOTATIONS_KEY));
+    tspProject = fromStored(await kvGet(TSP_PROJECT_KEY));
+    tspHandle = await kvGet<FileSystemDirectoryHandle>(TSP_HANDLE_KEY);
+    const compiled = await kvGet<{ entry?: string; csv: Record<string, string> } | Record<string, string>>(TSP_CSV_KEY);
+    if (compiled && typeof compiled.csv === 'object') {
+      tspCsv = compiled.csv as Record<string, string>;
+      tspCompiledEntry = (compiled as { entry?: string }).entry;
+    }
   } catch (err) {
     console.warn('could not restore capture', err);
   }
@@ -158,11 +194,18 @@ function deviceSignature(devices: readonly ScanDevice[]): string {
 
 function applyDefinitionFiles(): void {
   const locals = localSources.map((l) => localFile(l.name, l.text));
-  decoding.setFiles([...locals, ...remoteFiles]);
+  // a single own file: use all its outputs; the whole configuration (main.tsp): pick per device
+  const userFiles = new Set(tspCsv && tspCompiledEntry !== 'main.tsp' ? Object.keys(tspCsv) : []);
+  const compiled = tspUse && tspCsv ? selectCompiled(tspCsv, capture.status.devices, userFiles) : [];
+  decoding.setFiles([...locals, ...compiled, ...remoteFiles]);
   decoding.setDevices(capture.status.devices);
   if (defsState.state === 'ready') defsState = { ...defsState, messages: decoding.definitions?.messageCount ?? 0 };
-  else if (locals.length && defsState.state === 'none') {
-    defsState = { state: 'ready', report: { files: locals, unmatched: [], errors: [], offline: false }, messages: decoding.definitions?.messageCount ?? 0, at: Date.now() };
+  else if ((locals.length || compiled.length) && defsState.state === 'none') {
+    defsState = { state: 'ready', report: { files: [...locals, ...compiled], unmatched: [], errors: [], offline: false }, messages: decoding.definitions?.messageCount ?? 0, at: Date.now() };
+  }
+  if (defsState.state === 'ready') {
+    const others = defsState.report.files.filter((f) => !f.path.startsWith('typespec:'));
+    defsState = { ...defsState, report: { ...defsState.report, files: [...compiled, ...others] } };
   }
   scheduleRender();
 }
@@ -201,6 +244,7 @@ function onDevices(devices: readonly ScanDevice[]): void {
   savedDevices = signature;
   decoding.setDevices(devices);
   if (devices.length) void kvSet(DEVICES_KEY, devices).catch(() => {});
+  if (tspCsv) applyDefinitionFiles();
   void loadDefinitions();
 }
 
@@ -401,6 +445,11 @@ detailEl.addEventListener('click', (ev) => {
       case 'toggle-ignore':
         annotations.set(entry.key, { ignored: !annotations.isIgnored(entry.key) });
         break;
+      case 'show-tsp': {
+        const d = decoding.get(entry.key);
+        if (d) showTypeSpecView(d.def, d.file.path);
+        break;
+      }
     }
   }
   detailEl.dataset.key = ''; // force re-render
@@ -435,7 +484,7 @@ detailEl.addEventListener('mouseleave', () => {
 });
 
 document.addEventListener('keydown', (ev) => {
-  if (ev.key === 'Escape' && selectedKey && !dialog.open && !defsDialog.open && !findDialog.open) {
+  if (ev.key === 'Escape' && selectedKey && !dialog.open && !defsDialog.open && !findDialog.open && !tspDialog.open && !tspViewDialog.open) {
     selectedKey = undefined;
     selection = undefined;
     scheduleRender();
@@ -569,6 +618,265 @@ function setFilter(filter: FilterMode): void {
   view.filter = filter;
   for (const b of document.querySelectorAll<HTMLElement>('[data-filter]')) b.classList.toggle('active', b.dataset.filter === filter);
 }
+
+// ---------------------------------------------------------------------------
+// TypeSpec project (M4)
+
+const compiler = new TspCompiler();
+const tspDialog = $('tsp') as HTMLDialogElement;
+const tspText = $('tsp-text') as HTMLTextAreaElement;
+let tspOpenFile: string | undefined;
+let tspResult: CompileResult | undefined;
+let tspDiags: TspDiagnostic[] = [];
+let tspStatus = '';
+let tspCompiling = false;
+
+function saveProject(): void {
+  if (tspProject) void kvSet(TSP_PROJECT_KEY, toStored(tspProject)).catch(console.error);
+}
+
+function editorDirty(): boolean {
+  return !!tspProject && !!tspOpenFile && tspProject.files.get(tspOpenFile) !== tspText.value;
+}
+
+function applyEditor(): void {
+  if (!tspProject || !tspOpenFile || !editorDirty()) return;
+  tspProject.files.set(tspOpenFile, tspText.value);
+  tspProject.changed.add(tspOpenFile);
+  saveProject();
+}
+
+function renderTsp(): void {
+  const p = tspProject;
+  const files = p ? [...p.files.keys()].sort((a, b) => Number(b === 'main.tsp') - Number(a === 'main.tsp') || a.localeCompare(b)) : [];
+  $('tsp-project').textContent = p ? `${p.name} · ${p.files.size} files${p.changed.size ? ` · ${p.changed.size} changed` : ''}${tspHandle ? '' : ' · not linked to a folder'}` : 'no project';
+  ($('tsp-save') as HTMLButtonElement).disabled = !p || !p.changed.size || !tspHandle;
+  ($('tsp-zip') as HTMLButtonElement).disabled = !p;
+  ($('tsp-run') as HTMLButtonElement).disabled = !p || tspCompiling;
+  ($('tsp-csv') as HTMLButtonElement).disabled = !tspResult || !Object.keys(tspResult.csv).length;
+  ($('tsp-use') as HTMLInputElement).checked = tspUse;
+  const entry = $('tsp-entry') as HTMLSelectElement;
+  const tspFiles = files.filter((f) => f.endsWith('.tsp'));
+  const current = entry.value || (p ? defaultEntry(p.files) : undefined) || '';
+  entry.innerHTML = tspFiles.map((f) => `<option value="${esc(f)}"${f === current ? ' selected' : ''}>${esc(f)}</option>`).join('');
+  $('tsp-diags').innerHTML = renderDiagnostics(tspDiags);
+  $('tsp-files').innerHTML = renderFiles(files, p?.changed ?? new Set(), tspOpenFile, ($('tsp-filter') as HTMLInputElement).value, tspDiags);
+  $('tsp-file').textContent = tspOpenFile ?? '';
+  tspText.disabled = !tspOpenFile;
+  ($('tsp-file-save') as HTMLButtonElement).disabled = !tspOpenFile;
+  ($('tsp-file-revert') as HTMLButtonElement).disabled = !tspOpenFile;
+  $('tsp-status').innerHTML = tspStatus;
+}
+
+function openTspFile(path: string, line?: number, column?: number): void {
+  if (!tspProject) return;
+  applyEditor();
+  tspOpenFile = path;
+  tspText.value = tspProject.files.get(path) ?? '';
+  renderTsp();
+  if (line) {
+    const pos = offsetOf(tspText.value, line, column);
+    tspText.focus();
+    tspText.setSelectionRange(pos, pos);
+    const lineHeight = parseFloat(getComputedStyle(tspText).lineHeight) || 18;
+    tspText.scrollTop = Math.max(0, (line - 5) * lineHeight);
+    updatePos();
+  } else tspText.scrollTop = 0;
+}
+
+function updatePos(): void {
+  const { line, column } = positionOf(tspText.value, tspText.selectionStart);
+  $('tsp-pos').textContent = tspOpenFile ? `line ${line}, column ${column}${editorDirty() ? ' · not applied' : ''}` : '';
+}
+
+function setProject(p: ProjectData, handle: FileSystemDirectoryHandle | undefined): void {
+  tspProject = p;
+  tspHandle = handle;
+  tspOpenFile = undefined;
+  tspText.value = '';
+  tspResult = undefined;
+  tspDiags = [];
+  tspStatus = `Opened ${esc(p.name)} with ${p.files.size} files.`;
+  saveProject();
+  if (handle) void kvSet(TSP_HANDLE_KEY, handle).catch(() => {});
+  ($('tsp-entry') as HTMLSelectElement).value = '';
+  const lang = $('tsp-lang') as HTMLSelectElement;
+  lang.value = settings.source.language === 'de' && translationFile(p.files, 'de') ? 'de' : 'en';
+  renderTsp();
+  const entry = defaultEntry(p.files);
+  if (entry) openTspFile(entry);
+}
+
+function download(name: string, data: Uint8Array | string, type: string): void {
+  const blob = new Blob([data as BlobPart], { type });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = name;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+}
+
+$('btn-tsp').addEventListener('click', () => {
+  renderTsp();
+  tspDialog.showModal();
+  if (tspOpenFile === undefined && tspProject) {
+    const entry = defaultEntry(tspProject.files);
+    if (entry) openTspFile(entry);
+  }
+});
+$('tsp-close').addEventListener('click', () => {
+  applyEditor();
+  tspDialog.close();
+});
+tspDialog.addEventListener('close', applyEditor);
+
+const dirInput = $('tsp-dir') as HTMLInputElement;
+$('tsp-open').addEventListener('click', async () => {
+  if (tspProject?.changed.size && !confirm('Discard the changes in the current project?')) return;
+  if (!canPickDirectory()) {
+    dirInput.click();
+    return;
+  }
+  try {
+    const handle = await pickDirectory();
+    tspStatus = 'Reading folder…';
+    renderTsp();
+    const files = await readDirectory(handle);
+    setProject({ name: handle.name, files, changed: new Set() }, handle);
+  } catch (err) {
+    if ((err as Error).name !== 'AbortError') {
+      tspStatus = `<span class="error-text">Could not open the folder: ${esc((err as Error).message)}</span>`;
+      renderTsp();
+    }
+  }
+});
+dirInput.addEventListener('change', async () => {
+  const list = dirInput.files;
+  if (!list?.length) return;
+  const { name, files } = await readFileList(list);
+  dirInput.value = '';
+  setProject({ name, files, changed: new Set() }, undefined);
+});
+
+$('tsp-files').addEventListener('click', (ev) => {
+  const path = (ev.target as HTMLElement).closest<HTMLElement>('[data-file]')?.dataset.file;
+  if (path) openTspFile(path);
+});
+$('tsp-filter').addEventListener('input', renderTsp);
+$('tsp-diags').addEventListener('click', (ev) => {
+  const i = Number((ev.target as HTMLElement).closest<HTMLElement>('[data-diag]')?.dataset.diag);
+  const d = sortedDiagnostics(tspDiags)[i];
+  if (d?.file && tspProject?.files.has(d.file)) openTspFile(d.file, d.line, d.column);
+});
+for (const ev of ['keyup', 'click', 'input']) tspText.addEventListener(ev, updatePos);
+$('tsp-file-save').addEventListener('click', () => {
+  applyEditor();
+  updatePos();
+  renderTsp();
+});
+$('tsp-file-revert').addEventListener('click', () => {
+  if (tspProject && tspOpenFile) tspText.value = tspProject.files.get(tspOpenFile) ?? '';
+  updatePos();
+});
+
+$('tsp-save').addEventListener('click', async () => {
+  if (!tspProject || !tspHandle) return;
+  applyEditor();
+  try {
+    if (!(await ensureWritable(tspHandle))) throw new Error('no permission to write to the folder');
+    const n = await writeFiles(tspHandle, [...tspProject.changed].filter((p) => tspProject!.files.has(p)).map((p) => [p, tspProject!.files.get(p)!]));
+    tspProject.changed.clear();
+    saveProject();
+    tspStatus = `Saved ${n} file${n === 1 ? '' : 's'} to ${esc(tspProject.name)}.`;
+  } catch (err) {
+    tspStatus = `<span class="error-text">Saving failed: ${esc((err as Error).message)}. Use "Download sources" instead.</span>`;
+  }
+  renderTsp();
+});
+$('tsp-zip').addEventListener('click', () => {
+  if (!tspProject) return;
+  applyEditor();
+  download(`${tspProject.name}.zip`, createZip(tspProject.files), 'application/zip');
+});
+$('tsp-csv').addEventListener('click', () => {
+  if (tspResult) download(`${tspProject?.name ?? 'typespec'}-csv.zip`, createZip(Object.entries(tspResult.csv)), 'application/zip');
+});
+$('tsp-use').addEventListener('change', (ev) => {
+  tspUse = (ev.target as HTMLInputElement).checked;
+  applyDefinitionFiles();
+});
+
+$('tsp-run').addEventListener('click', async () => {
+  if (!tspProject || tspCompiling) return;
+  applyEditor();
+  const entry = ($('tsp-entry') as HTMLSelectElement).value || defaultEntry(tspProject.files);
+  if (!entry) return;
+  if (!(await compiler.available())) {
+    tspStatus = '<span class="error-text">The TypeSpec compiler is not part of this build. Run <code>npm install</code> and <code>npm run build</code>.</span>';
+    renderTsp();
+    return;
+  }
+  const lang = ($('tsp-lang') as HTMLSelectElement).value;
+  const translations = lang === 'en' ? undefined : translationFile(tspProject.files, lang);
+  tspCompiling = true;
+  tspStatus = `Compiling ${esc(entry)}…${tspResult ? '' : ' (loading the compiler the first time takes a moment)'}`;
+  renderTsp();
+  try {
+    const req: Parameters<typeof compiler.compile>[0] = { files: Object.fromEntries(tspProject.files), entry };
+    if (translations) req.translations = translations;
+    tspResult = await compiler.compile(req);
+    tspDiags = tspResult.diagnostics;
+    const errors = tspDiags.filter((d) => d.severity === 'error').length;
+    const csvCount = Object.keys(tspResult.csv).length;
+    tspStatus =
+      `Compiled in ${(tspResult.timeMs / 1000).toFixed(1)} s: ${csvCount} CSV file${csvCount === 1 ? '' : 's'}, ` +
+      `<span class="${errors ? 'error-text' : ''}">${errors} error${errors === 1 ? '' : 's'}</span>, ${tspDiags.length - errors} warnings` +
+      (tspResult.compilerVersion ? ` <span class="muted">(TypeSpec ${esc(tspResult.compilerVersion)})</span>` : '');
+    if (csvCount) {
+      tspCsv = tspResult.csv;
+      tspCompiledEntry = entry;
+      void kvSet(TSP_CSV_KEY, { entry, csv: tspCsv }).catch(() => {});
+      applyDefinitionFiles();
+    }
+  } catch (err) {
+    tspStatus = `<span class="error-text">Compiler failed: ${esc((err as Error).message.split('\n')[0] ?? '')}</span>`;
+    console.error(err);
+  } finally {
+    tspCompiling = false;
+    renderTsp();
+  }
+});
+
+// TypeSpec for one decoded definition (TSP-3)
+const tspViewDialog = $('tsp-view') as HTMLDialogElement;
+let tspViewDefs: { name: string; text: string } | undefined;
+
+function showTypeSpecView(def: import('./defs/definitions.ts').MessageDef, filePath: string): void {
+  const path = filePath.replace(/^typespec:/, '');
+  const manufacturer = path.includes('/') ? path.slice(0, path.indexOf('/')) : undefined;
+  const text = writeTypeSpec([def], manufacturer ? { manufacturer } : {});
+  tspViewDefs = { name: `${manufacturer ? `${manufacturer}/` : ''}${suggestFileName([def])}`, text };
+  $('tsp-view-name').textContent = `${def.circuit}.${def.name}`;
+  ($('tsp-view-text') as HTMLTextAreaElement).value = text;
+  tspViewDialog.showModal();
+}
+$('tsp-view-close').addEventListener('click', () => tspViewDialog.close());
+$('tsp-view-copy').addEventListener('click', () => void navigator.clipboard?.writeText(($('tsp-view-text') as HTMLTextAreaElement).value));
+$('tsp-view-add').addEventListener('click', () => {
+  if (!tspViewDefs) return;
+  if (!tspProject) setProject({ name: 'drafts', files: new Map(), changed: new Set() }, undefined);
+  const p = tspProject!;
+  let path = `drafts/${tspViewDefs.name.split('/').pop()}`;
+  for (let i = 2; p.files.has(path); i++) path = path.replace(/(_\d+)?\.tsp$/, `_${i}.tsp`);
+  p.files.set(path, tspViewDefs.text);
+  p.changed.add(path);
+  saveProject();
+  tspViewDialog.close();
+  ($('tsp-entry') as HTMLSelectElement).value = path;
+  renderTsp();
+  tspDialog.showModal();
+  openTspFile(path);
+});
 
 // ---------------------------------------------------------------------------
 // Start
