@@ -308,3 +308,12 @@ dialog.full[open] { display: flex; flex-direction: column; gap: 8px; }
 .device.participant.unscanned { border-style: dashed; }
 .device.participant .count { color: var(--muted); font-size: 11px; margin-left: 2px; }
 .device.participant.active .count { color: var(--accent); }
+
+/* Value filter (M7) */
+.valuefilter { display: inline-flex; align-items: center; gap: 4px; flex: 1 1 260px; }
+.valuefilter #vf-value { flex: 1; min-width: 150px; }
+.valuefilter #vf-tol { width: 78px; }
+.valuefilter label.check { display: inline-flex; align-items: center; gap: 4px; color: var(--muted); white-space: nowrap; }
+.valuefilter.active #vf-value { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.vhit { margin-top: 2px; font-size: 12px; color: var(--accent); }
+.b.hit { background: var(--accent); color: #fff; border-radius: 2px; }

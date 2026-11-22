@@ -22,6 +22,11 @@
 
     <section class="toolbar">
       <input id="search" type="search" placeholder="Search address, PB SB, hex, device…" aria-label="Search" />
+      <div class="valuefilter" role="group" aria-label="Value filter">
+        <input id="vf-value" type="search" placeholder="Value from display, e.g. 45,5 °C" aria-label="Show only telegrams containing this value" title="Show only telegrams where some decoding at some byte position yields this value" />
+        <input id="vf-tol" type="number" min="0" step="any" placeholder="± auto" aria-label="Tolerance" title="Tolerance (default: half a unit of the last digit entered)" />
+        <label class="check small" title="Also search older payloads (newest 100 per message)"><input id="vf-history" type="checkbox" /> history</label>
+      </div>
       <div class="segmented" role="group" aria-label="Filter">
         <button type="button" data-filter="all" class="active">All</button>
         <button type="button" data-filter="unknown">Unknown</button>

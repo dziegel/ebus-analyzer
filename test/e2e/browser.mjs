@@ -67,6 +67,17 @@ try {
     throw err;
   }
   await page.screenshot({ path: `${out}/4-decoded-with-compiled.png` });
+  step('value filter (M7): enter the outside temperature shown in the list');
+  await page.click('[data-action="close-detail"]').catch(() => {});
+  const outside = (await page.textContent('tr[data-key="10feb51601"] .c-msg'))?.match(/value=([\d.]+)/)?.[1];
+  if (!outside) throw new Error('outside temperature not found');
+  await page.fill('#vf-value', `${Number(outside).toFixed(1).replace('.', ',')} °C`);
+  await page.waitForFunction(() => /containing/.test(document.getElementById('counts')?.textContent ?? ''), null, { timeout: 5_000 });
+  const keys = await page.$$eval('tr[data-key]', (r) => r.map((x) => x.dataset.key));
+  step(`value filter ${outside}: ${keys.join(', ')}`);
+  for (const k of ['10feb51601', '1008b5090d5501']) if (!keys.includes(k)) throw new Error(`value filter: ${k} missing`);
+  await page.screenshot({ path: `${out}/5-value-filter.png` });
+  await page.fill('#vf-value', '');
   if (errors.length) throw new Error(`browser errors: ${errors.join('\n')}`);
   step('ok');
 } catch (err) {

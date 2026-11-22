@@ -20,7 +20,7 @@ import {
 } from './ui/render.ts';
 import { applyView, isKnown, participants, type FilterMode, type SortMode, type ViewState } from './ui/view.ts';
 import { AnnotationStore, parseTags } from './store/annotations.ts';
-import { parseQuery, searchValue, type SearchHit } from './analysis/search.ts';
+import { parseQuery, searchValue, valueFilter, type ParsedQuery, type SearchHit } from './analysis/search.ts';
 import { buildSeries, seriesId, valueAt, type SeriesData, type SeriesSource } from './analysis/series.ts';
 import { chartLayout, renderChart, tFor, xFor, PLOT_LEFT, type ChartLayout } from './ui/chart.ts';
 import { renderSearchResults, type ByteSelection } from './ui/analysis.ts';
@@ -74,6 +74,56 @@ let tspCompiledEntry: string | undefined;
 let tspUse = true;
 
 // ---------------------------------------------------------------------------
+// Value filter (UNK-11, UNK-12)
+
+/** Newest payloads per message searched when "history" is checked. */
+const VALUE_FILTER_SAMPLES = 100;
+let valueQuery: ParsedQuery | undefined;
+let valueHistory = false;
+let valueMatches: Map<string, SearchHit[]> | undefined;
+let valueFilterDirty = false;
+
+function valueFilterLabel(q: ParsedQuery): string {
+  return q.kind === 'number' ? `${q.value} ±${Number(q.tolerance.toPrecision(3))}` : `"${q.text}"`;
+}
+
+function updateValueFilter(all: readonly Entry[]): void {
+  if (!valueFilterDirty) return;
+  valueFilterDirty = false;
+  if (!valueQuery) {
+    valueMatches = undefined;
+    return;
+  }
+  const start = performance.now();
+  valueMatches = valueFilter(all, valueQuery, {
+    history: valueHistory,
+    maxSamples: VALUE_FILTER_SAMPLES,
+    fields: (e, s, latest) => (latest ? decoding.get(e.key) : decoding.decodeSample(e, s))?.result.fields,
+  });
+  const ms = performance.now() - start;
+  if (ms > 500) console.warn(`value filter took ${ms.toFixed(0)} ms for ${all.length} messages`);
+}
+
+let valueInputTimer: ReturnType<typeof setTimeout> | undefined;
+function readValueFilter(): void {
+  const text = ($('vf-value') as HTMLInputElement).value;
+  const tolStr = ($('vf-tol') as HTMLInputElement).value;
+  const tol = tolStr === '' ? undefined : Number(tolStr);
+  valueQuery = parseQuery(text, tol !== undefined && Number.isFinite(tol) && tol >= 0 ? tol : undefined);
+  valueHistory = ($('vf-history') as HTMLInputElement).checked;
+  $('vf-value').closest('.valuefilter')?.classList.toggle('active', !!valueQuery);
+  valueFilterDirty = true;
+  scheduleRender();
+}
+for (const id of ['vf-value', 'vf-tol']) {
+  $(id).addEventListener('input', () => {
+    clearTimeout(valueInputTimer);
+    valueInputTimer = setTimeout(readValueFilter, 200);
+  });
+}
+$('vf-history').addEventListener('change', readValueFilter);
+
+// ---------------------------------------------------------------------------
 // Rendering
 
 let frame = 0;
@@ -96,6 +146,7 @@ function viewContext(): DetailContext {
     },
   };
   if (selection) ctx.selection = selection;
+  if (valueMatches) ctx.valueMatches = valueMatches;
   return ctx;
 }
 
@@ -110,6 +161,7 @@ function render(): void {
   frame = 0;
   const all = store.entries();
   decoding.update(all);
+  updateValueFilter(all);
   const ctx = viewContext();
   const shown = applyView(all, view, ctx);
   $('status').innerHTML = renderStatus(client.state, capture.status, stateDetail);
@@ -118,7 +170,7 @@ function render(): void {
   $('devices').innerHTML = renderDevices(capture.status.devices, defsState, localSources.length, parts, view.participant);
   const selectedPart = parts.find((p) => p.key === view.participant);
   const partName = selectedPart ? `${selectedPart.addresses.map(hex2).join('/') || hex2(selectedPart.key)}${selectedPart.device ? ` ${selectedPart.device.deviceId}` : ''}` : undefined;
-  $('counts').innerHTML = renderCounts(all, shown.length, ctx, partName);
+  $('counts').innerHTML = renderCounts(all, shown.length, ctx, partName, valueQuery ? valueFilterLabel(valueQuery) : undefined);
   $('rows').innerHTML = renderRows(shown, ctx, selectedKey);
   const detail = $('detail');
   const entry = selectedKey ? store.get(selectedKey) : undefined;
@@ -137,6 +189,7 @@ function render(): void {
 
 store.onChange(() => {
   decoding.invalidate();
+  valueFilterDirty = true;
   scheduleRender();
 });
 capture.onChange(() => {
@@ -197,6 +250,7 @@ function deviceSignature(devices: readonly ScanDevice[]): string {
 }
 
 function applyDefinitionFiles(): void {
+  valueFilterDirty = true;
   const locals = localSources.map((l) => localFile(l.name, l.text));
   // a single own file: use all its outputs; the whole configuration (main.tsp): pick per device
   const userFiles = new Set(tspCsv && tspCompiledEntry !== 'main.tsp' ? Object.keys(tspCsv) : []);
@@ -602,6 +656,7 @@ $('find-form').addEventListener('submit', (ev) => {
   const ctx = viewContext();
   const onlyUnknown = ($('find-unknown') as HTMLInputElement).checked;
   searchHits = searchValue(store.entries(), query, {
+    fields: (e, s, latest) => (latest ? decoding.get(e.key) : decoding.decodeSample(e, s))?.result.fields,
     history: ($('find-history') as HTMLInputElement).checked,
     filter: (e) => !annotations.isIgnored(e.key) && (!onlyUnknown || isKnown(e, ctx) !== true),
   });

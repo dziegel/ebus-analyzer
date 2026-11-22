@@ -10,6 +10,7 @@ import type { Entry } from '../store/telegram-store.ts';
 import { ago, bytesHtml, dateTime, duration, esc, hex2, timestamp, varyingBytes } from './format.ts';
 import { isKnown, type Participant, type ViewContext } from './view.ts';
 import { renderByteAnalysis, renderNotes, type ByteSelection } from './analysis.ts';
+import type { SearchHit } from '../analysis/search.ts';
 import { seriesId } from '../analysis/series.ts';
 
 /** Resolves a bus address to a device name using the scan result (master → its slave). */
@@ -132,12 +133,13 @@ export function renderDefinitionsReport(defs: DefinitionsState, localNames: read
 // ---------------------------------------------------------------------------
 // Telegram list
 
-export function renderCounts(all: readonly Entry[], shown: number, ctx: ViewContext, participant?: string): string {
+export function renderCounts(all: readonly Entry[], shown: number, ctx: ViewContext, participant?: string, valueFilter?: string): string {
   const newCount = all.filter((e) => e.isNew).length;
   const unknown = all.filter((e) => isKnown(e, ctx) === false).length;
   const decoded = ctx.definitionsLoaded ? ` · ${all.length - unknown} decoded` : '';
   const ignored = ctx.annotations ? all.filter((e) => ctx.annotations!.isIgnored(e.key)).length : 0;
-  return `${shown} of ${all.length} messages${participant ? ` (from/to ${esc(participant)})` : ''} · <span class="new-text">${newCount} new</span> · ${unknown} unknown${decoded}${ignored ? ` · ${ignored} ignored` : ''}`;
+  const filters = [participant ? `from/to ${esc(participant)}` : '', valueFilter ? `containing ${esc(valueFilter)}` : ''].filter(Boolean).join(', ');
+  return `${shown} of ${all.length} messages${filters ? ` (${filters})` : ''} · <span class="new-text">${newCount} new</span> · ${unknown} unknown${decoded}${ignored ? ` · ${ignored} ignored` : ''}`;
 }
 
 function knownBadge(e: Entry, ctx: ViewContext): string {
@@ -169,6 +171,31 @@ function annotationHtml(e: Entry, ctx: ViewContext): string {
   return `<div class="annot">${tags}${tags && note ? ' ' : ''}${note}</div>`;
 }
 
+/** Where the value filter found the value: "= 6.50 as D2C in response[1..2]". */
+function hitText(h: SearchHit): string {
+  const where = `${h.part === 'm' ? 'data' : 'response'}[${h.offset}${h.length > 1 ? `..${h.offset + h.length - 1}` : ''}]`;
+  const how = h.field ? `field ${h.field} (${h.type})` : `as ${h.type}`;
+  return `${h.text} ${how} in ${where}${h.latest ? '' : ` at ${timestamp(h.t)}`}`;
+}
+
+function valueHitHtml(hits: readonly SearchHit[] | undefined): string {
+  const best = hits?.[0];
+  if (!best) return '';
+  const more = hits!.length - 1;
+  const title = hits!.slice(0, 12).map(hitText).join('\n') + (hits!.length > 12 ? `\n… ${hits!.length - 12} more` : '');
+  return `<div class="vhit" title="${esc(title)}">= ${esc(hitText(best))}${more ? ` <span class="muted">+${more} more</span>` : ''}</div>`;
+}
+
+/** Byte indexes (in the shown payload, i.e. after the ID) of the best hit in the latest payload. */
+function hitBytes(e: Entry, hits: readonly SearchHit[] | undefined, part: 'm' | 's'): Set<number> | undefined {
+  const h = hits?.find((x) => x.latest);
+  if (!h || h.part !== part) return undefined;
+  const shift = part === 'm' ? e.id.length / 2 : 0;
+  const out = new Set<number>();
+  for (let i = h.offset; i < h.offset + h.length; i++) out.add(i - shift);
+  return out;
+}
+
 function messageCell(d: Decoded | undefined, extra = ''): string {
   if (!d) return extra || '<span class="none">–</span>';
   const name = `<b>${esc(d.def.circuit)}.${esc(d.def.name)}</b>`;
@@ -195,6 +222,7 @@ export function renderRows(
       const varSlave = varyingBytes(e.history.map((s) => s.slave));
       const last = e.history.at(-1);
       const known = isKnown(e, ctx);
+      const hits = ctx.valueMatches?.get(e.key);
       const cls = [e.isNew ? 'is-new' : '', e.key === selectedKey ? 'selected' : '', known ? 'is-known' : '']
         .filter(Boolean)
         .join(' ');
@@ -205,9 +233,9 @@ export function renderRows(
         `<td class="c-dst" data-label="To">${addressCell(e.target, name)}</td>` +
         `<td class="c-cmd mono" data-label="PB SB">${hex2(e.pb)} ${hex2(e.sb)}</td>` +
         `<td class="c-id mono" data-label="ID">${e.id ? esc(e.id) : '<span class="none">–</span>'}</td>` +
-        `<td class="c-msg" data-label="Message">${messageCell(ctx.decoded?.(e), annotationHtml(e, ctx))}</td>` +
-        `<td class="c-data mono" data-label="Data">${bytesHtml(last?.master ?? '', varMaster)}</td>` +
-        `<td class="c-slave mono" data-label="Response">${e.kind === 'master-slave' ? bytesHtml(last?.slave ?? '', varSlave) : '<span class="none">–</span>'}</td>` +
+        `<td class="c-msg" data-label="Message">${messageCell(ctx.decoded?.(e), annotationHtml(e, ctx) + valueHitHtml(hits))}</td>` +
+        `<td class="c-data mono" data-label="Data">${bytesHtml(last?.master ?? '', varMaster, 'var', hitBytes(e, hits, 'm'))}</td>` +
+        `<td class="c-slave mono" data-label="Response">${e.kind === 'master-slave' ? bytesHtml(last?.slave ?? '', varSlave, 'var', hitBytes(e, hits, 's')) : '<span class="none">–</span>'}</td>` +
         `<td class="c-num" data-label="Count">${e.count}<span class="muted small"> · ${duration(e.intervalMs)}</span></td>` +
         `<td class="c-num" data-label="Last seen" title="${esc(dateTime(e.lastSeen))}">${ago(e.lastSeen, now)}</td>` +
         `</tr>`

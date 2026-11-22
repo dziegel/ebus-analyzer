@@ -69,9 +69,9 @@ export function varyingBytes(samples: readonly string[]): Set<number> {
 }
 
 /** Renders hex bytes as spans; bytes in `mark` get the given class. */
-export function bytesHtml(hex: string, mark?: ReadonlySet<number>, markClass = 'var'): string {
+export function bytesHtml(hex: string, mark?: ReadonlySet<number>, markClass = 'var', hit?: ReadonlySet<number>): string {
   if (!hex) return '<span class="none">–</span>';
   return hexBytes(hex)
-    .map((b, i) => `<span class="b${mark?.has(i) ? ` ${markClass}` : ''}">${b}</span>`)
+    .map((b, i) => `<span class="b${mark?.has(i) ? ` ${markClass}` : ''}${hit?.has(i) ? ' hit' : ''}">${b}</span>`)
     .join('');
 }

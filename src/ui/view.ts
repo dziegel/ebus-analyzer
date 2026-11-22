@@ -1,6 +1,7 @@
 import type { Decoded } from '../defs/repository.ts';
 import { BROADCAST, isMaster } from '../ebus/address.ts';
 import type { ScanDevice } from '../ebusd/protocol.ts';
+import type { SearchHit } from '../analysis/search.ts';
 import type { AnnotationStore } from '../store/annotations.ts';
 import type { Entry } from '../store/telegram-store.ts';
 import { hex2 } from './format.ts';
@@ -73,6 +74,8 @@ export interface ViewContext {
   definitionsLoaded?: boolean;
   /** Notes, tags and ignored flags (UNK-9). */
   annotations?: AnnotationStore;
+  /** Active value filter (UNK-11): hits per message key; messages without hits are hidden. */
+  valueMatches?: ReadonlyMap<string, readonly SearchHit[]>;
 }
 
 /** Whether a message is known: decoded by the loaded definitions, else ebusd's flag. */
@@ -112,6 +115,7 @@ export function applyView(entries: readonly Entry[], view: ViewState, ctx: ViewC
     if (view.filter === 'unknown' && isKnown(e, ctx) === true) return false;
     if (view.filter === 'new' && !e.isNew) return false;
     if (view.participant !== undefined && !involves(e, view.participant)) return false;
+    if (ctx.valueMatches && !ctx.valueMatches.has(e.key)) return false;
     if (terms.length) {
       const text = searchText(e, ctx);
       if (!terms.every((t) => text.includes(t))) return false;

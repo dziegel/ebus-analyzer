@@ -5,6 +5,8 @@ Browser tool that simplifies reverse engineering of eBUS traffic using
 
 - Shows all telegrams ebusd sees, grouped by message, with frequency and history
 - Filters by bus participant: one button per device (and per other address seen)
+- Filters by value: enter a value from the heat pump's display and see only the
+  telegrams that contain it
 - Highlights new and unknown telegrams and the bytes that change
 - Decodes telegrams with the definitions from
   [ebusd-configuration](https://github.com/john30/ebusd-configuration)
@@ -12,10 +14,9 @@ Browser tool that simplifies reverse engineering of eBUS traffic using
   value search, charts over time, notes and tags
 - Reads, edits and compiles eBUS TypeSpec in the browser with the official
   TypeSpec compiler and ebus-typespec, and writes TypeSpec from definitions
-- Planned: a value filter for the list (enter a value from the display, see only
-  telegrams that contain it) and an assistant that drafts TypeSpec for unknown telegrams
+- Planned: an assistant that drafts TypeSpec for unknown telegrams
 
-Status: milestones M1 (capture), M2 (decoding), M3 (analysis) and M4 (TypeSpec) done. See [docs/REQUIREMENTS.md](docs/REQUIREMENTS.md).
+Status: milestones M1 (capture), M2 (decoding), M3 (analysis), M4 (TypeSpec) and M7 (value filter) done. See [docs/REQUIREMENTS.md](docs/REQUIREMENTS.md).
 
 ## How it works
 
@@ -66,6 +67,26 @@ other filters and the search. Following the eBUS convention, a participant
 comprises its slave address and the master address 5 below it, so the
 controller at 15 also covers telegrams sent from 10. Broadcasts count only
 for their sender.
+
+## Filtering by value
+
+Enter a value you can read on the heat pump's display in the value field next
+to the search (`45,5`, `45.5 °C` or a text such as `HMU`). The list then shows
+only the telegrams for which some decoding at some byte position yields this
+value:
+
+- the decoded fields of known messages (with their own divisors and value lists), and
+- all common eBUS types (UCH, D1C, D2B, D2C, UIN/10, EXP, …) at every byte
+  position of the data and the response, so unknown messages are found too.
+
+Each remaining row shows where and how the value was found (e.g.
+`= 6.00 as D2C in response[1..2]`) and highlights the bytes; the tooltip lists
+further matches. Numbers match within half a unit of the last digit entered
+(`45,5` → ±0.05); the `±` field sets another tolerance. With *history*, the
+newest 100 older payloads per message are searched as well, so a value shown on
+the display a moment ago is still found. The filter updates as new telegrams
+arrive and combines with the other filters, the search and the participant
+filter. Clearing the field shows all telegrams again.
 
 ## Analysing unknown messages
 
