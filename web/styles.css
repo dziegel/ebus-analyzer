@@ -99,7 +99,7 @@ button.icon { padding: 3px 9px; font-size: 16px; line-height: 1.2; }
 .new-text { color: var(--new); }
 
 /* Layout */
-.layout { flex: 1; display: flex; gap: 12px; padding: 0 16px 16px; min-height: 0; }
+.layout { flex: 1; display: flex; padding: 0 16px 16px; min-height: 0; --detail-width: 420px; }
 .table-wrap {
   flex: 1; min-width: 0; overflow: auto; background: var(--panel);
   border: 1px solid var(--line); border-radius: 8px;
@@ -138,7 +138,7 @@ th { font-size: 12px; font-weight: 600; color: var(--muted); position: sticky; t
 
 /* Detail panel */
 .detail {
-  flex: 0 0 420px; max-width: 45%; overflow: auto; background: var(--panel);
+  flex: 0 0 var(--detail-width); max-width: calc(100% - 332px); min-width: 0; overflow: auto; background: var(--panel);
   border: 1px solid var(--line); border-radius: 8px; padding: 14px 16px;
 }
 .detail-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
@@ -148,6 +148,20 @@ th { font-size: 12px; font-weight: 600; color: var(--muted); position: sticky; t
 .detail-actions { display: flex; gap: 6px; }
 .history td { padding: 3px 6px; }
 .history th { position: static; }
+
+/* Separator between list and detail panel: drag, arrow keys, double-click resets */
+.splitter {
+  flex: 0 0 12px; cursor: col-resize; touch-action: none; position: relative;
+  display: flex; justify-content: center;
+}
+.splitter[hidden] { display: none; }
+.splitter::before {
+  content: ''; width: 2px; margin: 8px 0; border-radius: 1px; background: transparent; transition: background 0.15s;
+}
+.splitter:hover::before, .splitter:focus-visible::before, body.resizing .splitter::before { background: var(--accent); }
+.splitter:focus-visible { outline: none; }
+body.resizing { cursor: col-resize; user-select: none; }
+body.resizing iframe, body.resizing .detail, body.resizing .table-wrap { pointer-events: none; }
 
 /* Settings dialog */
 dialog { border: 1px solid var(--line); border-radius: 10px; background: var(--panel); color: var(--text); width: min(480px, 92vw); }
@@ -172,6 +186,7 @@ dialog .hint { font-size: 12px; color: var(--muted); margin: 6px 0 0; }
     color: var(--muted); font-family: system-ui, sans-serif; font-size: 12px;
   }
   .telegrams td.c-num { text-align: left; }
+  .splitter { display: none; }
   .detail {
     position: fixed; inset: 0; max-width: none; border-radius: 0; z-index: 10; border: 0;
   }

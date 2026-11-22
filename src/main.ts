@@ -44,6 +44,7 @@ import { selectCompiled } from './tsp/outputs.ts';
 import { suggestFileName, writeTypeSpec } from './tsp/writer.ts';
 import { createZip } from './util/zip.ts';
 import { offsetOf, positionOf, renderDiagnostics, renderFiles, sortedDiagnostics } from './ui/typespec.ts';
+import { initSplitter } from './ui/splitter.ts';
 import { createDraft, defaultCircuit, draftCsvLine, draftDefinition, setIdLength, validateDraft, type Direction, type Draft, type DraftField, type Issue } from './assistant/draft.ts';
 import { DraftStore, DRAFTS_PATH, TSP_MARKER, draftTspPath } from './assistant/store.ts';
 import { parseFilename } from './defs/select.ts';
@@ -181,6 +182,7 @@ function render(): void {
   const detail = $('detail');
   const entry = selectedKey ? store.get(selectedKey) : undefined;
   detail.hidden = !entry;
+  $('splitter').hidden = !entry;
   // keep the detail panel stable while the pointer is over it (hover
   // highlighting) or while the user is typing a note
   const editing = detail.contains(document.activeElement) && document.activeElement?.matches('input, textarea');
@@ -1194,6 +1196,8 @@ asDialog.addEventListener('close', () => {
 
 // ---------------------------------------------------------------------------
 // Start
+
+initSplitter(document.querySelector<HTMLElement>('.layout')!, $('splitter'), detailEl);
 
 void restore().then(() => {
   applyDefinitionFiles();

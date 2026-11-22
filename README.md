@@ -56,6 +56,10 @@ TypeSpec sources of ebusd-configuration. One file is picked per device
 The decoder is a port of ebusd's data types and field handling and is checked
 against ebusd's own test vectors (see Development).
 
+The detail panel can be made wider or narrower by dragging the separator
+between the list and the panel (or with the arrow keys when it is focused);
+double-click restores the default width. The width is remembered.
+
 ## Filtering by bus participant
 
 Above the list, every bus participant is a button: the devices from ebusd's
