@@ -71,13 +71,19 @@ try {
   await page.click('[data-action="close-detail"]').catch(() => {});
   const outside = (await page.textContent('tr[data-key="10feb51601"] .c-msg'))?.match(/value=([\d.]+)/)?.[1];
   if (!outside) throw new Error('outside temperature not found');
+  // the register and the broadcast are polled independently, so include older payloads
+  await page.check('#vf-history');
   await page.fill('#vf-value', `${Number(outside).toFixed(1).replace('.', ',')} °C`);
   await page.waitForFunction(() => /containing/.test(document.getElementById('counts')?.textContent ?? ''), null, { timeout: 5_000 });
+  await page
+    .waitForFunction(() => ['10feb51601', '1008b5090d5501'].every((k) => document.querySelector(`tr[data-key="${k}"]`)), null, { timeout: 15_000 })
+    .catch(() => {});
   const keys = await page.$$eval('tr[data-key]', (r) => r.map((x) => x.dataset.key));
   step(`value filter ${outside}: ${keys.join(', ')}`);
   for (const k of ['10feb51601', '1008b5090d5501']) if (!keys.includes(k)) throw new Error(`value filter: ${k} missing`);
   await page.screenshot({ path: `${out}/5-value-filter.png` });
   await page.fill('#vf-value', '');
+  await page.uncheck('#vf-history');
 
   step('definition assistant (M5): define the unknown register 0d5501');
   await page.click('tr[data-key="1008b5090d5501"]');
