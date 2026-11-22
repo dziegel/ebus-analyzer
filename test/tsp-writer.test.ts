@@ -46,7 +46,7 @@ test('writes TypeSpec from definitions', () => {
   // master field in a read message is @out, factor for negative divisors
   assert.match(tsp, /model Mixed \{\n    @out\n    id: UCH;\n\n    @factor\(10\)\n    v: UIN;/);
   // broadcast circuit: own namespace with its zz, passive, no @out for master data
-  assert.match(tsp, /@zz\(0xfe\)\nnamespace Broadcast \{\n  @id\(0xb5, 0x16, 0x01\)\n  @passive\n  model Outside \{\n    @unit\("°C"\)\n    value: D2B;/);
+  assert.match(tsp, /\nnamespace Broadcast \{\n  @id\(0xb5, 0x16, 0x01\)\n  @passive\n  @zz\(0xfe\)\n  model Outside \{\n    @unit\("°C"\)\n    value: D2B;/);
   assert.match(tsp, /renamed from FlowTemp \(r\)[^\n]*\n  model FlowTemp_1 \{/);
   assert.equal(suggestFileName(f.messages), '08.hmu.tsp');
 });
@@ -77,4 +77,11 @@ test('project helpers', async () => {
   const p = await readFileList([mk('src/main.tsp', 'm'), mk('src/vaillant/a.tsp', 'a'), mk('src/node_modules/x.tsp', 'x'), mk('src/readme.md', 'r'), mk('src/.git/y.tsp', 'y')]);
   assert.equal(p.name, 'src');
   assert.deepEqual([...p.files.keys()], ['main.tsp', 'vaillant/a.tsp']);
+});
+
+test('broadcasts get @zz on each model', () => {
+  const csv = `${HEADER}\nu,broadcast,,Info,,,fe,b516,08,text,,STR:5,,,`;
+  const tsp = writeTypeSpec(parseDefinitionFile(csv, 'x.csv', {}).messages, { manufacturer: 'Vaillant' });
+  assert.match(tsp, /\nnamespace Broadcast \{\n  @id\(0xb5, 0x16, 0x08\)\n  @passive\n  @zz\(0xfe\)\n  model Info/);
+  assert.doesNotMatch(tsp, /^@zz/m);
 });

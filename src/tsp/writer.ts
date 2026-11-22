@@ -159,7 +159,9 @@ export function writeTypeSpec(defs: readonly MessageDef[], opts: WriteOptions = 
   if (opts.manufacturer) lines.push(`namespace ${pascalCase(opts.manufacturer)};`);
   for (const [circuit, list] of byCircuit) {
     const zzs = new Set(list.map((d) => (d.zz?.length === 1 ? d.zz[0] : undefined)));
-    const nsZz = zzs.size === 1 ? [...zzs][0] : undefined;
+    // broadcasts carry @zz on each model (like ebusd-configuration); the
+    // emitter ignores a namespace @zz(0xfe)
+    const nsZz = zzs.size === 1 && [...zzs][0] !== 0xfe ? [...zzs][0] : undefined;
     lines.push('');
     if (nsZz !== undefined) lines.push(`@zz(${hex(nsZz)})`);
     lines.push(`namespace ${pascalCase(circuit)} {`);
