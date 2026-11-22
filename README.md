@@ -14,9 +14,11 @@ Browser tool that simplifies reverse engineering of eBUS traffic using
   value search, charts over time, notes and tags
 - Reads, edits and compiles eBUS TypeSpec in the browser with the official
   TypeSpec compiler and ebus-typespec, and writes TypeSpec from definitions
-- Planned: an assistant that drafts TypeSpec for unknown telegrams
+- Definition assistant: turns an unknown telegram into a definition with type
+  suggestions, checks it against all captured payloads and writes TypeSpec
+- Planned: live test of drafts against ebusd (M6)
 
-Status: milestones M1 (capture), M2 (decoding), M3 (analysis), M4 (TypeSpec) and M7 (value filter) done. See [docs/REQUIREMENTS.md](docs/REQUIREMENTS.md).
+Status: milestones M1 (capture), M2 (decoding), M3 (analysis), M4 (TypeSpec), M5 (assistant) and M7 (value filter) done. See [docs/REQUIREMENTS.md](docs/REQUIREMENTS.md).
 
 ## How it works
 
@@ -131,6 +133,32 @@ folder of a clone of [ebusd-configuration](https://github.com/john30/ebusd-confi
 The compiler is bundled by `npm run build` (`web/dist/tsp-worker.js`, loaded
 only when compiling). Without `npm install`, the app builds without it.
 
+## Definition assistant
+
+**Create definition** in the detail panel of a message opens the assistant
+with a draft: target address, PB SB, ID bytes and direction (read, write,
+passive) are taken from the telegram, the circuit from the device's
+definition file or ident (e.g. `hmu`).
+
+- Click a byte of the data or the response (shift-click to extend the
+  selection). The assistant suggests types whose values are valid in every
+  captured payload, ranked by plausibility (temperature range, smooth
+  changes, little-endian high byte, printable text), e.g. `D2C 5.5 … 7`.
+  **Add as field**, or pick any type for the selected length.
+- Per field: name, type, divisor or factor, value list (`0=off;1=on`), unit
+  and comment. Bit fields (`BI0` … `BI7`) can share a byte.
+- The values of all fields are shown for every captured payload; the issue
+  list reports invalid names, overlapping fields, fields inside the ID, and
+  values that are invalid or missing in some payloads.
+- The TypeSpec preview is updated while typing; the ebusd CSV line is shown
+  below it.
+- **Save draft** stores the draft in the browser (and in exports). Saved
+  drafts without errors decode immediately and take precedence over all other
+  definitions.
+- **Save to TypeSpec project** writes all drafts as `assistant/ZZ.circuit.tsp`
+  into the TypeSpec project (one file per device and circuit), where they can
+  be compiled, edited and saved to the folder.
+
 ## Quick start
 
 Requirements: Node.js 22.18 or newer, a running ebusd.
@@ -196,7 +224,8 @@ EBUSD_SRC=../ebusd EBUS_CDN=../ebus.github.io npm test
   installed: compiles the complete configuration and compares it with the CDN.
 
 `test/e2e/browser.mjs` runs the whole chain in a headless browser (fake ebusd →
-bridge → app → definitions from the CDN → TypeSpec compile in the worker); CI
+bridge → app → definitions from the CDN → TypeSpec compile in the worker →
+value filter → definition assistant); CI
 runs it and keeps the screenshots as artifact.
 
 The app is plain TypeScript and DOM without a framework or bundler; `tsc`
@@ -210,6 +239,7 @@ type stripping.
 | `src/defs/` | eBUS data types, CSV definition parser, conditions, file selection, CDN loader, telegram matching |
 | `src/decoding.ts` | Decodes captured messages with the loaded definitions |
 | `src/analysis/` | Byte statistics, candidate types, value search, time series |
+| `src/assistant/` | Definition drafts: CSV conversion, validation, type suggestions, draft store |
 | `src/tsp/` | TypeSpec: in-memory compiler host and worker, project I/O, TypeSpec writer |
 | `scripts/` | Bundling of the TypeSpec compiler worker |
 | `src/store/` | Telegram aggregation (counts, intervals, history), IndexedDB persistence |

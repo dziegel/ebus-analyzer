@@ -78,6 +78,40 @@ try {
   for (const k of ['10feb51601', '1008b5090d5501']) if (!keys.includes(k)) throw new Error(`value filter: ${k} missing`);
   await page.screenshot({ path: `${out}/5-value-filter.png` });
   await page.fill('#vf-value', '');
+
+  step('definition assistant (M5): define the unknown register 0d5501');
+  await page.click('tr[data-key="1008b5090d5501"]');
+  await page.click('#detail [data-action="assistant"]');
+  await page.waitForSelector('#assistant[open]');
+  const head = await page.$$eval('#as-head [data-draft]', (els) => els.map((e) => `${e.dataset.draft}=${e.value}`).join(' '));
+  step(`draft: ${head}`);
+  if (!/circuit=hmu/.test(head) || !/idlen=3/.test(head)) throw new Error(`unexpected draft defaults: ${head}`);
+  await page.click('#as-bytes [data-p="s"][data-i="1"]');
+  step(`suggestions: ${(await page.$$eval('#as-selection tbody tr td:first-child', (r) => r.map((x) => x.textContent))).join(', ')}`);
+  await page.click('#as-selection [data-action="as-add"][data-type="D2C"]');
+  await page.fill('#as-fields input[data-k="name"]', 'Outside');
+  await page.fill('#as-fields input[data-k="unit"]', '°C');
+  const preview = await page.inputValue('#as-preview');
+  if (!/model Msg_b509_0d5501 \{[\s\S]*Outside: D2C;/.test(preview)) throw new Error(`unexpected preview:\n${preview}`);
+  await page.screenshot({ path: `${out}/6-assistant.png` });
+  await page.click('#as-save');
+  await page.click('#as-close');
+  await page.mouse.move(5, 5);
+  await page.waitForFunction(() => document.querySelector('tr[data-key="1008b5090d5501"] .c-msg')?.textContent?.includes('hmu.Msg_b509_0d5501'), null, { timeout: 10_000 });
+  step(`decoded by the draft: ${await page.textContent('tr[data-key="1008b5090d5501"] .c-msg')}`);
+
+  step('drafts into the TypeSpec project and compile');
+  await page.click('#detail [data-action="assistant"]');
+  await page.click('#as-project');
+  await page.waitForSelector('#tsp[open]');
+  await page.selectOption('#tsp-entry', 'assistant/08.hmu.tsp');
+  await page.click('#tsp-run');
+  await page.waitForFunction(() => /Compiled in|failed/.test(document.getElementById('tsp-status')?.textContent ?? ''), null, { timeout: 120_000 });
+  const draftStatus = await page.textContent('#tsp-status');
+  step(`compile status: ${draftStatus}`);
+  await page.screenshot({ path: `${out}/7-draft-compiled.png` });
+  if (!/Compiled in .*0 errors/.test(draftStatus ?? '')) throw new Error(`draft compile did not succeed: ${draftStatus}`);
+  await page.click('#tsp-close');
   if (errors.length) throw new Error(`browser errors: ${errors.join('\n')}`);
   step('ok');
 } catch (err) {

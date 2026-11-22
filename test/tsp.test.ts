@@ -12,6 +12,8 @@ import { parseDefinitionFile, type MessageDef } from '../src/defs/definitions.ts
 import { defaultsFor } from '../src/defs/loader.ts';
 import { writeTypeSpec } from '../src/tsp/writer.ts';
 import type { LibraryBundle } from '../src/tsp/protocol.ts';
+import { DraftStore } from '../src/assistant/store.ts';
+import { draftDefinition, type Draft } from '../src/assistant/draft.ts';
 
 let compileProject: typeof import('../src/tsp/compile.ts').compileProject | undefined;
 let libraries: LibraryBundle[] = [];
@@ -96,6 +98,38 @@ test('TypeSpec written by the app compiles back to the same definitions', { skip
   assert.deepEqual(r.diagnostics.filter((d) => d.severity === 'error'), [], tsp);
   const back = parseOutputs(r.csv).flatMap((o) => o.parsed.messages);
   assert.deepEqual(back.map(summary).sort(), source.messages.map(summary).sort(), `${tsp}\n---\n${Object.values(r.csv).join('\n')}`);
+});
+
+test('definition drafts of the assistant compile to the same definitions (ASS-4)', { skip }, async () => {
+  const base = { manufacturer: 'Vaillant', updated: 0 };
+  const list: Draft[] = [
+    { ...base, key: 'a', name: 'Register', circuit: 'hmu', direction: 'r', zz: 8, pb: 0xb5, sb: 0x09, id: [0x0d, 0x55, 0x01], fields: [
+      { name: 'temp', part: 's', offset: 1, type: 'D2C', unit: '°C', comment: 'outside' },
+      { name: 'pump', part: 's', offset: 4, type: 'BI0', values: '0=off;1=on' },
+      { name: 'burner', part: 's', offset: 4, type: 'BI7' },
+      { name: 'power', part: 's', offset: 5, type: 'UIN', divisor: 10, unit: 'kW' },
+    ] },
+    { ...base, key: 'b', name: 'SetPoint', circuit: 'hmu', direction: 'w', zz: 8, pb: 0xb5, sb: 0x10, id: [0x02], fields: [
+      { name: 'mode', part: 'm', offset: 2, type: 'UCH', values: '0=off;1=auto' },
+      { name: 'target', part: 'm', offset: 3, type: 'D1C' },
+    ] },
+    { ...base, key: 'c', name: 'Info', circuit: 'broadcast', direction: 'u', zz: 0xfe, pb: 0xb5, sb: 0x16, id: [0x08], fields: [
+      { name: 'text', part: 'm', offset: 1, type: 'STR:5' },
+      { name: 'time', part: 'm', offset: 6, type: 'HTM' },
+    ] },
+  ];
+  const drafts = new DraftStore();
+  for (const d of list) drafts.save(d);
+  const files = Object.fromEntries(drafts.typeSpecFiles());
+  assert.deepEqual(Object.keys(files).sort(), ['assistant/08.hmu.tsp', 'assistant/fe.broadcast.tsp']);
+  const named = (d: MessageDef) => summary({ ...d, fields: d.fields.filter((f) => !/^IGN/i.test(f.typeName)) });
+  for (const [path, tsp] of Object.entries(files)) {
+    const r = await compileProject!({ files: { [path]: tsp }, entry: path }, libraries);
+    assert.deepEqual(r.diagnostics.filter((d) => d.severity === 'error'), [], tsp);
+    const back = parseOutputs(r.csv).flatMap((o) => o.parsed.messages);
+    const expected = list.filter((d) => path.includes(`.${d.circuit}.`)).map((d) => draftDefinition(d));
+    assert.deepEqual(back.map(named).sort(), expected.map(named).sort(), `${tsp}\n---\n${Object.values(r.csv).join('\n')}`);
+  }
 });
 
 const config = process.env.EBUSD_CONFIG;

@@ -44,6 +44,10 @@ import { selectCompiled } from './tsp/outputs.ts';
 import { suggestFileName, writeTypeSpec } from './tsp/writer.ts';
 import { createZip } from './util/zip.ts';
 import { offsetOf, positionOf, renderDiagnostics, renderFiles, sortedDiagnostics } from './ui/typespec.ts';
+import { createDraft, defaultCircuit, draftCsvLine, draftDefinition, setIdLength, validateDraft, type Direction, type Draft, type DraftField, type Issue } from './assistant/draft.ts';
+import { DraftStore, DRAFTS_PATH, TSP_MARKER, draftTspPath } from './assistant/store.ts';
+import { parseFilename } from './defs/select.ts';
+import { renderDraftBytes, renderDraftFields, renderDraftHead, renderDraftSamples, renderDraftSelection, renderIssues, type DraftSelection } from './ui/assistant.ts';
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 
@@ -53,6 +57,7 @@ const client = new EbusdClient();
 const capture = new Capture(client, store, settings.pollIntervalMs);
 const decoding = new DecodingService();
 const annotations = new AnnotationStore();
+const drafts = new DraftStore();
 const cache: Cache = { get: kvGet, set: kvSet };
 const loader = new DefinitionLoader(cache);
 
@@ -139,6 +144,7 @@ function viewContext(): DetailContext {
     decoded: (e: Entry) => decoding.get(e.key),
     annotations,
     charted: new Set(chartSources.map(seriesId)),
+    hasDraft: (key: string) => !!drafts.get(key),
     telegram: entryTelegram,
     decodeSample: (e: Entry, i: number) => {
       const s = e.history[i];
@@ -212,6 +218,7 @@ const ANNOTATIONS_KEY = 'annotations';
 const TSP_PROJECT_KEY = 'tsp-project';
 const TSP_HANDLE_KEY = 'tsp-handle';
 const TSP_CSV_KEY = 'tsp-csv';
+const DRAFTS_KEY = 'drafts';
 const autosave = throttle(() => void kvSet(CAPTURE_KEY, store.toJSON()).catch(console.error), 3000);
 
 async function restore(): Promise<void> {
@@ -222,6 +229,7 @@ async function restore(): Promise<void> {
     if (devices?.length && !capture.status.devices.length) capture.status.devices = devices;
     localSources = (await kvGet<Array<{ name: string; text: string }>>(LOCAL_DEFS_KEY)) ?? [];
     annotations.load(await kvGet(ANNOTATIONS_KEY));
+    drafts.load(await kvGet(DRAFTS_KEY));
     tspProject = fromStored(await kvGet(TSP_PROJECT_KEY));
     tspHandle = await kvGet<FileSystemDirectoryHandle>(TSP_HANDLE_KEY);
     const compiled = await kvGet<{ entry?: string; csv: Record<string, string> } | Record<string, string>>(TSP_CSV_KEY);
@@ -236,6 +244,10 @@ async function restore(): Promise<void> {
   annotations.onChange(() => {
     void kvSet(ANNOTATIONS_KEY, annotations.toJSON()).catch(console.error);
     scheduleRender();
+  });
+  drafts.onChange(() => {
+    void kvSet(DRAFTS_KEY, drafts.toJSON()).catch(console.error);
+    applyDefinitionFiles();
   });
 }
 
@@ -255,15 +267,17 @@ function applyDefinitionFiles(): void {
   // a single own file: use all its outputs; the whole configuration (main.tsp): pick per device
   const userFiles = new Set(tspCsv && tspCompiledEntry !== 'main.tsp' ? Object.keys(tspCsv) : []);
   const compiled = tspUse && tspCsv ? selectCompiled(tspCsv, capture.status.devices, userFiles) : [];
-  decoding.setFiles([...locals, ...compiled, ...remoteFiles]);
+  const draftFile = drafts.definitionFile();
+  const own = draftFile ? [draftFile, ...locals] : locals;
+  decoding.setFiles([...own, ...compiled, ...remoteFiles]);
   decoding.setDevices(capture.status.devices);
   if (defsState.state === 'ready') defsState = { ...defsState, messages: decoding.definitions?.messageCount ?? 0 };
-  else if ((locals.length || compiled.length) && defsState.state === 'none') {
-    defsState = { state: 'ready', report: { files: [...locals, ...compiled], unmatched: [], errors: [], offline: false }, messages: decoding.definitions?.messageCount ?? 0, at: Date.now() };
+  else if ((own.length || compiled.length) && defsState.state === 'none') {
+    defsState = { state: 'ready', report: { files: [...own, ...compiled], unmatched: [], errors: [], offline: false }, messages: decoding.definitions?.messageCount ?? 0, at: Date.now() };
   }
   if (defsState.state === 'ready') {
-    const others = defsState.report.files.filter((f) => !f.path.startsWith('typespec:'));
-    defsState = { ...defsState, report: { ...defsState.report, files: [...compiled, ...others] } };
+    const others = defsState.report.files.filter((f) => !f.path.startsWith('typespec:') && f.path !== DRAFTS_PATH);
+    defsState = { ...defsState, report: { ...defsState.report, files: [...(draftFile ? [draftFile] : []), ...compiled, ...others] } };
   }
   scheduleRender();
 }
@@ -423,7 +437,7 @@ $('btn-clear').addEventListener('click', () => {
 });
 
 $('btn-export').addEventListener('click', () => {
-  const data = { ...store.toJSON(), devices: capture.status.devices, annotations: annotations.toJSON() };
+  const data = { ...store.toJSON(), devices: capture.status.devices, annotations: annotations.toJSON(), drafts: drafts.toJSON() };
   const blob = new Blob([JSON.stringify(data, null, 1)], { type: 'application/json' });
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
@@ -445,9 +459,10 @@ fileInput.addEventListener('change', async () => {
     if (text.trimStart().startsWith('{')) {
       if (store.size && !confirm('Replace the current capture with the imported one?')) return;
       selectedKey = undefined;
-      const data = JSON.parse(text) as { devices?: ScanDevice[]; annotations?: unknown };
+      const data = JSON.parse(text) as { devices?: ScanDevice[]; annotations?: unknown; drafts?: unknown };
       store.load(data);
       if (data.annotations) annotations.load(data.annotations, true);
+      if (data.drafts) drafts.load(data.drafts, true);
       if (Array.isArray(data.devices) && data.devices.length && client.state !== 'connected') {
         capture.status.devices = data.devices;
         onDevices(data.devices);
@@ -515,6 +530,9 @@ detailEl.addEventListener('click', (ev) => {
         if (d) showTypeSpecView(d.def, d.file.path);
         break;
       }
+      case 'assistant':
+        openAssistant(entry);
+        break;
     }
   }
   detailEl.dataset.key = ''; // force re-render
@@ -942,6 +960,236 @@ $('tsp-view-add').addEventListener('click', () => {
   renderTsp();
   tspDialog.showModal();
   openTspFile(path);
+});
+
+// ---------------------------------------------------------------------------
+// Definition assistant (M5, ASS-1..7)
+
+const asDialog = $('assistant') as HTMLDialogElement;
+let asDraft: Draft | undefined;
+let asEntry: Entry | undefined;
+let asSel: DraftSelection | undefined;
+let asIssues: Issue[] = [];
+let asDirty = false;
+
+/** Circuit name for an address: from the loaded definition file of the device, else the scan ident. */
+function circuitFor(address: number): string {
+  for (const f of remoteFiles) {
+    if (f.device !== address) continue;
+    const info = parseFilename(f.path.split('/').pop() ?? '');
+    if (info?.circuit) return info.circuit.toLowerCase();
+  }
+  const dev = capture.status.devices.find((d) => d.address === address);
+  return defaultCircuit(dev?.deviceId, address);
+}
+
+function manufacturerFor(address: number): string | undefined {
+  const dev = capture.status.devices.find((d) => d.address === address) ?? capture.status.devices.find((d) => d.manufacturer);
+  const m = dev?.manufacturer.trim();
+  return m && /^[A-Za-z]/.test(m) ? m.replace(/[^A-Za-z0-9]/g, '') : undefined;
+}
+
+function openAssistant(e: Entry): void {
+  const saved = drafts.get(e.key);
+  asEntry = e;
+  asDraft = saved ? structuredClone(saved) : createDraft(e, { circuit: circuitFor, manufacturer: manufacturerFor });
+  asDirty = false;
+  asSel = undefined;
+  $('as-telegram').textContent = `${hex2(e.source)} → ${hex2(e.target)} · ${hex2(e.pb)} ${hex2(e.sb)} ${e.id} · ${e.history.length} samples`;
+  $('as-head').innerHTML = renderDraftHead(asDraft, e);
+  renderAssistant(true);
+  asDialog.showModal();
+}
+
+function draftState(): 'saved' | 'changed' | 'new' {
+  if (!asDraft) return 'new';
+  if (!drafts.get(asDraft.key)) return 'new';
+  return asDirty ? 'changed' : 'saved';
+}
+
+/** Re-renders the assistant; the field editor only when `fields` (to keep the input focus while typing). */
+function renderAssistant(fields: boolean): void {
+  const d = asDraft;
+  const e = asEntry;
+  if (!d || !e) return;
+  asIssues = validateDraft(d, e);
+  $('as-bytes').innerHTML = renderDraftBytes(d, e, asSel);
+  $('as-selection').innerHTML = renderDraftSelection(d, e, asSel);
+  if (fields) $('as-fields').innerHTML = renderDraftFields(d, asIssues);
+  else {
+    const bad = new Set(asIssues.filter((i) => i.level === 'error' && i.field !== undefined).map((i) => i.field));
+    $('as-fields').querySelectorAll('tbody tr').forEach((tr, i) => tr.classList.toggle('bad', bad.has(i)));
+  }
+  $('as-samples').innerHTML = renderDraftSamples(d, e);
+  $('as-issues').innerHTML = renderIssues(asIssues, draftState());
+  let preview: string;
+  let csv = '';
+  try {
+    const def = draftDefinition(d);
+    preview = writeTypeSpec([def], d.manufacturer ? { manufacturer: d.manufacturer } : {});
+    csv = draftCsvLine(d);
+  } catch (err) {
+    preview = `// The draft cannot be converted yet:\n// ${err instanceof Error ? err.message : String(err)}`;
+  }
+  ($('as-preview') as HTMLTextAreaElement).value = preview;
+  $('as-csv').textContent = csv;
+  ($('as-delete') as HTMLButtonElement).disabled = !drafts.get(d.key);
+}
+
+function changeDraft(fields = false): void {
+  asDirty = true;
+  if (asDraft) asDraft.updated = Date.now();
+  renderAssistant(fields);
+}
+
+$('as-head').addEventListener('input', (ev) => {
+  const el = ev.target as HTMLInputElement | HTMLSelectElement;
+  const d = asDraft;
+  if (!d || !asEntry || !el.dataset.draft) return;
+  const v = el.value;
+  switch (el.dataset.draft) {
+    case 'name':
+      d.name = v.trim();
+      break;
+    case 'circuit':
+      d.circuit = v.trim();
+      break;
+    case 'manufacturer':
+      if (v.trim()) d.manufacturer = v.trim();
+      else delete d.manufacturer;
+      break;
+    case 'comment':
+      if (v) d.comment = v;
+      else delete d.comment;
+      break;
+    case 'direction':
+      d.direction = v as Direction;
+      break;
+    case 'idlen': {
+      const n = Number(v);
+      if (!Number.isInteger(n) || n < 0) return;
+      asDraft = { ...setIdLength(d, asEntry, n), fields: d.fields };
+      if (asSel?.part === 'm' && asSel.from < asDraft.id.length) asSel = undefined;
+      break;
+    }
+  }
+  changeDraft(el.dataset.draft === 'idlen');
+});
+
+$('as-bytes').addEventListener('click', (ev) => {
+  const el = (ev.target as HTMLElement).closest<HTMLElement>('[data-action="as-byte"]');
+  if (!el) return;
+  const part = el.dataset.p === 's' ? 's' : 'm';
+  const i = Number(el.dataset.i);
+  if ((ev as MouseEvent).shiftKey && asSel?.part === part) {
+    asSel = { part, from: Math.min(asSel.from, i), to: Math.max(asSel.to, i) };
+  } else if (asSel?.part === part && asSel.from === i && asSel.to === i) {
+    asSel = undefined;
+  } else asSel = { part, from: i, to: i };
+  renderAssistant(false);
+});
+
+function addField(type: string, divisor?: number): void {
+  const d = asDraft;
+  if (!d || !asSel) return;
+  const base = type.replace(/[^A-Za-z0-9]/g, '').toLowerCase();
+  let name = `${asSel.part === 'm' ? 'd' : 'r'}${asSel.from}_${base}`;
+  for (let n = 2; d.fields.some((f) => f.name === name); n++) name = `${asSel.part === 'm' ? 'd' : 'r'}${asSel.from}_${base}${n}`;
+  const f: DraftField = { name, part: asSel.part, offset: asSel.from, type };
+  if (divisor) f.divisor = divisor;
+  d.fields.push(f);
+  d.fields.sort((a, b) => (a.part === b.part ? a.offset - b.offset : a.part === 'm' ? -1 : 1));
+  asSel = undefined;
+  changeDraft(true);
+  const idx = d.fields.indexOf(f);
+  const input = $('as-fields').querySelector<HTMLInputElement>(`input[data-f="${idx}"][data-k="name"]`);
+  input?.focus();
+  input?.select();
+}
+
+$('as-selection').addEventListener('click', (ev) => {
+  const el = (ev.target as HTMLElement).closest<HTMLElement>('[data-action]');
+  if (!el) return;
+  if (el.dataset.action === 'as-add') addField(el.dataset.type ?? 'UCH', el.dataset.divisor ? Number(el.dataset.divisor) : undefined);
+  else if (el.dataset.action === 'as-add-manual') addField(($('as-type') as HTMLSelectElement).value);
+});
+
+$('as-fields').addEventListener('input', (ev) => {
+  const el = ev.target as HTMLInputElement | HTMLSelectElement;
+  const f = asDraft?.fields[Number(el.dataset.f)];
+  const k = el.dataset.k as keyof DraftField | undefined;
+  if (!f || !k) return;
+  const v = el.value;
+  if (k === 'divisor') {
+    const n = Number(v);
+    if (v.trim() && Number.isFinite(n) && n !== 0) f.divisor = n;
+    else delete f.divisor;
+  } else if (k === 'name' || k === 'type') f[k] = v.trim();
+  else if (k === 'values' || k === 'unit' || k === 'comment') {
+    if (v.trim()) f[k] = v.trim();
+    else delete f[k];
+  }
+  changeDraft(k === 'type');
+});
+$('as-fields').addEventListener('click', (ev) => {
+  const el = (ev.target as HTMLElement).closest<HTMLElement>('[data-action="as-remove"]');
+  if (!el || !asDraft) return;
+  asDraft.fields.splice(Number(el.dataset.f), 1);
+  changeDraft(true);
+});
+
+$('as-save').addEventListener('click', () => {
+  if (!asDraft) return;
+  const errors = asIssues.filter((i) => i.level === 'error');
+  if (errors.length && !confirm(`The draft has ${errors.length} error(s) and will not be used for decoding until they are fixed. Save anyway?`)) return;
+  drafts.save(structuredClone(asDraft));
+  asDirty = false;
+  renderAssistant(false);
+  detailEl.dataset.key = '';
+});
+$('as-delete').addEventListener('click', () => {
+  if (!asDraft || !drafts.get(asDraft.key) || !confirm('Delete this draft?')) return;
+  drafts.delete(asDraft.key);
+  asDirty = true;
+  renderAssistant(false);
+  detailEl.dataset.key = '';
+});
+$('as-copy').addEventListener('click', () => void navigator.clipboard?.writeText(($('as-preview') as HTMLTextAreaElement).value));
+$('as-project').addEventListener('click', () => {
+  if (!asDraft) return;
+  if (asDirty || !drafts.get(asDraft.key)) drafts.save(structuredClone(asDraft));
+  asDirty = false;
+  const files = drafts.typeSpecFiles();
+  if (!files.size) return alert('No draft can be converted yet; fix the errors first.');
+  if (!tspProject) setProject({ name: 'drafts', files: new Map(), changed: new Set() }, undefined);
+  const p = tspProject!;
+  const foreign = [...files.keys()].filter((path) => p.files.has(path) && !p.files.get(path)!.startsWith(TSP_MARKER));
+  if (foreign.length && !confirm(`Replace ${foreign.join(', ')}? ${foreign.length === 1 ? 'It was' : 'They were'} not written by the assistant.`)) return;
+  let n = 0;
+  for (const [path, text] of files) {
+    if (p.files.get(path) === text) continue;
+    p.files.set(path, text);
+    p.changed.add(path);
+    n++;
+  }
+  saveProject();
+  const path = draftTspPath(asDraft.zz, asDraft.circuit);
+  tspStatus = `Updated ${n} of ${files.size} assistant file${files.size === 1 ? '' : 's'} in the project${p.files.has('main.tsp') ? ' (not imported by main.tsp: compile the file as entry or add an import)' : ''}.`;
+  asDialog.close();
+  ($('tsp-entry') as HTMLSelectElement).value = files.has(path) ? path : '';
+  renderTsp();
+  tspDialog.showModal();
+  if (files.has(path)) openTspFile(path);
+});
+$('as-close').addEventListener('click', () => {
+  if (!asDirty || confirm('Discard the unsaved changes of the draft?')) asDialog.close();
+});
+asDialog.addEventListener('cancel', (ev) => {
+  if (asDirty && !confirm('Discard the unsaved changes of the draft?')) ev.preventDefault();
+});
+asDialog.addEventListener('close', () => {
+  asEntry = undefined;
+  scheduleRender();
 });
 
 // ---------------------------------------------------------------------------

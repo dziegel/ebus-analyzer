@@ -156,6 +156,36 @@
       </div>
     </dialog>
 
+    <dialog id="assistant" class="full" aria-label="Definition assistant">
+      <div class="tsp-head">
+        <h2>Definition assistant</h2>
+        <span id="as-telegram" class="mono small muted"></span>
+        <div class="tsp-actions">
+          <button type="button" id="as-save" class="primary" title="Save the draft; it is used for decoding right away">Save draft</button>
+          <button type="button" id="as-project" title="Write all drafts as TypeSpec into the project (assistant/ZZ.circuit.tsp)">Save to TypeSpec project</button>
+          <button type="button" id="as-delete">Delete draft</button>
+          <button type="button" id="as-close">Close</button>
+        </div>
+      </div>
+      <div id="as-head" class="as-head"></div>
+      <div class="as-body">
+        <div class="as-main">
+          <div id="as-bytes"></div>
+          <div id="as-selection" class="as-selection"></div>
+          <h3>Fields</h3>
+          <div id="as-fields"></div>
+          <h3>Values in the captured samples <span class="muted small">(newest first)</span></h3>
+          <div id="as-samples" class="as-samples"></div>
+        </div>
+        <div class="as-side">
+          <div id="as-issues" class="as-issues"></div>
+          <div class="as-preview-head"><b>TypeSpec</b> <button type="button" id="as-copy" class="small">Copy</button></div>
+          <textarea id="as-preview" class="tsp-view-text" spellcheck="false" wrap="off" readonly aria-label="TypeSpec preview"></textarea>
+          <details><summary class="small muted">ebusd CSV</summary><pre id="as-csv" class="small as-csv"></pre></details>
+        </div>
+      </div>
+    </dialog>
+
     <dialog id="tsp-view" class="wide">
       <h2>TypeSpec for <span id="tsp-view-name" class="mono"></span></h2>
       <p class="hint">Generated from the CSV definition. Conditions and chained IDs are kept as comments.</p>

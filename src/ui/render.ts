@@ -317,6 +317,8 @@ export interface DetailContext extends ViewContext {
   selection?: ByteSelection;
   /** IDs of the series currently shown in the chart. */
   charted?: ReadonlySet<string>;
+  /** Whether a definition draft exists for a message (M5). */
+  hasDraft?: (key: string) => boolean;
 }
 
 /** Number of history rows shown in the detail panel. */
@@ -357,6 +359,7 @@ export function renderDetail(e: Entry | undefined, ctx: DetailContext): string {
     </div>
     ${t ? `<p class="telegram mono">${telegramHtml(t)}</p>` : ''}
     ${decoded ? renderDecoded(decoded, t, e.key, charted) : ctx.definitionsLoaded ? '<p class="muted">No definition matches this message.</p>' : ''}
+    <p><button type="button" class="${decoded ? 'small' : 'primary'}" data-action="assistant">${ctx.hasDraft?.(e.key) ? 'Edit definition draft' : decoded ? 'New definition draft' : 'Create definition'}</button></p>
     <dl class="facts">
       <dt>Type</dt><dd>${esc(e.kind)}</dd>
       <dt>From</dt><dd>${hex2(e.source)}${src ? ` (${esc(src)})` : ''}</dd>

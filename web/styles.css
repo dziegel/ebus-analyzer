@@ -317,3 +317,49 @@ dialog.full[open] { display: flex; flex-direction: column; gap: 8px; }
 .valuefilter.active #vf-value { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
 .vhit { margin-top: 2px; font-size: 12px; color: var(--accent); }
 .b.hit { background: var(--accent); color: #fff; border-radius: 2px; }
+
+/* Definition assistant (M5) */
+.as-head { display: flex; flex-wrap: wrap; gap: 10px; align-items: flex-end; }
+.as-head label { display: flex; flex-direction: column; gap: 2px; font-size: 12px; color: var(--muted); margin: 0; }
+.as-head input[data-draft="name"] { width: 220px; }
+.as-head input[data-draft="comment"] { width: 280px; }
+.as-head input[data-draft="idlen"] { width: 64px; }
+.as-body { flex: 1; min-height: 0; display: flex; gap: 14px; }
+.as-main { flex: 1; min-width: 0; overflow: auto; padding-right: 4px; }
+.as-side { flex: 0 0 420px; display: flex; flex-direction: column; gap: 6px; min-height: 0; }
+.as-side .tsp-view-text { flex: 1; height: auto; min-height: 200px; }
+.as-preview-head { display: flex; align-items: center; gap: 8px; }
+.as-csv { white-space: pre-wrap; word-break: break-all; max-height: 120px; overflow: auto; }
+.as-issues { max-height: 35%; overflow: auto; font-size: 12px; display: flex; flex-direction: column; gap: 3px; }
+.as-issues .issue { padding: 3px 6px; border-radius: 4px; border-left: 3px solid var(--line); background: var(--bg); }
+.as-issues .issue.error { border-color: var(--new); }
+.as-issues .issue.warning { border-color: var(--warn); }
+.as-issues .issue.ok { border-color: var(--ok); }
+.as-part { margin: 8px 0 2px; font-size: 12px; color: var(--muted); }
+.as-bytes { display: flex; flex-wrap: wrap; gap: 3px; }
+.as-bytes .cell { position: relative; }
+.as-bytes .cell.idbyte { opacity: 0.55; cursor: not-allowed; }
+.as-bytes .cell.infield { border-color: var(--var); box-shadow: inset 0 -3px 0 var(--var); }
+.as-bytes .cell.sel { outline: 2px solid var(--accent); outline-offset: 1px; }
+.as-bytes .cell .fname { font-family: system-ui, sans-serif; font-size: 10px; color: var(--var); max-width: 60px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.as-selection { margin: 10px 0; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); }
+.as-selection table td, .as-selection table th { padding: 3px 6px; font-size: 13px; }
+.as-selection th { position: static; }
+.as-fields td, .as-fields th { padding: 3px 4px; font-size: 13px; vertical-align: middle; }
+.as-fields th { position: static; }
+.as-fields input { padding: 3px 5px; font-size: 13px; }
+.as-fields input[data-k="name"] { width: 120px; }
+.as-fields input[data-k="divisor"] { width: 64px; }
+.as-fields input[data-k="values"] { width: 150px; }
+.as-fields input[data-k="unit"] { width: 56px; }
+.as-fields input[data-k="comment"] { width: 160px; }
+.as-fields tr.bad input[data-k="name"], .as-fields tr.bad select { border-color: var(--new); }
+.as-samples { max-height: 260px; overflow: auto; }
+.as-samples td, .as-samples th { padding: 2px 8px; font-size: 12px; white-space: nowrap; }
+.as-samples th { position: sticky; top: 0; }
+.as-samples td.err { color: var(--new); }
+@media (max-width: 900px) {
+  .as-body { flex-direction: column; overflow: auto; }
+  .as-side { flex: 0 0 auto; }
+  .as-main { overflow: visible; }
+}

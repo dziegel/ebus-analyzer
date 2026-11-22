@@ -1,6 +1,6 @@
 # EBus Analyzer – Requirements
 
-Status: Draft · Last updated: 2026-11-22 · Implemented: M1, M2, M3, M4, M7, UI-5
+Status: Draft · Last updated: 2026-11-22 · Implemented: M1, M2, M3, M4, M5, M7, UI-5
 
 EBus Analyzer is a browser application that receives eBUS telegrams from
 [ebusd](https://github.com/john30/ebusd), decodes them using the message
