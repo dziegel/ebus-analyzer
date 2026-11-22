@@ -4,22 +4,24 @@
 // of a decoded message, add it to a project and compile it in the worker.
 //
 //   npm i --no-save playwright && npx playwright install chromium
-//   node test/e2e/browser.mjs            (E2E_CDN=http://... to use a local CDN copy)
+//   node test/e2e/browser.mjs            (E2E_CDN=http://... to use a local CDN copy,
+//                                         E2E_BROWSER=firefox for Firefox)
 
 import { spawn } from 'node:child_process';
 import { mkdirSync } from 'node:fs';
 import { setTimeout as sleep } from 'node:timers/promises';
-import { chromium } from 'playwright';
+import { chromium, firefox } from 'playwright';
 
-const out = 'e2e-artifacts';
+const engine = process.env.E2E_BROWSER ?? 'chromium';
+const out = `e2e-artifacts/${engine}`;
 mkdirSync(out, { recursive: true });
 const procs = [
   spawn(process.execPath, ['tools/fake-ebusd.mjs', '--port', '28888'], { stdio: 'inherit' }),
   spawn(process.execPath, ['bridge/ebusd-bridge.mjs', '--port', '28080', '--bind', '127.0.0.1', '--ebusd-port', '28888'], { stdio: 'inherit' }),
 ];
-const step = (msg) => console.log(`[e2e] ${msg}`);
+const step = (msg) => console.log(`[e2e ${engine}] ${msg}`);
 let failed = false;
-const browser = await chromium.launch();
+const browser = await { chromium, firefox }[engine].launch();
 try {
   await sleep(800);
   const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
@@ -36,8 +38,26 @@ try {
   step(`definitions: ${await page.textContent('.device.defs')}`);
   await page.screenshot({ path: `${out}/1-decoded.png` });
 
-  step('TypeSpec view of hmu.Status01');
+  step('separator between list and detail panel (UI-6)');
   await page.click('tr[data-key="1008b51101"]');
+  const sep = await page.waitForSelector('#splitter:not([hidden])');
+  const box = await sep.boundingBox();
+  const line = await page.evaluate(() => getComputedStyle(document.getElementById('splitter'), '::before').backgroundColor);
+  if (!box || box.width < 8 || box.height < 100 || /^(transparent|rgba\(0, 0, 0, 0\))$/.test(line)) throw new Error(`separator not visible: ${JSON.stringify(box)} ${line}`);
+  const detailWidth = async () => (await page.$eval('#detail', (d) => d.getBoundingClientRect().width));
+  const before = await detailWidth();
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(box.x + box.width / 2 - 100, box.y + box.height / 2, { steps: 5 });
+  await page.mouse.move(box.x + box.width / 2 - 200, box.y + box.height / 2, { steps: 5 });
+  await page.mouse.up();
+  const after = await detailWidth();
+  step(`detail panel ${Math.round(before)} → ${Math.round(after)} px`);
+  if (Math.abs(after - before - 200) > 4) throw new Error(`dragging the separator did not resize the panel: ${before} → ${after}`);
+  await page.screenshot({ path: `${out}/1b-separator.png` });
+  await page.dblclick('#splitter');
+
+  step('TypeSpec view of hmu.Status01');
   await page.click('#detail [data-action="show-tsp"]');
   const tsp = await page.inputValue('#tsp-view-text');
   if (!tsp.includes('model Status01')) throw new Error(`unexpected TypeSpec:\n${tsp}`);

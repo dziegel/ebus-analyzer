@@ -149,16 +149,24 @@ th { font-size: 12px; font-weight: 600; color: var(--muted); position: sticky; t
 .history td { padding: 3px 6px; }
 .history th { position: static; }
 
-/* Separator between list and detail panel: drag, arrow keys, double-click resets */
+/* Separator between list and detail panel: drag, arrow keys, double-click resets.
+   Always visible: a thin line with a grip in the middle; accent colour while active. */
 .splitter {
-  flex: 0 0 12px; cursor: col-resize; touch-action: none; position: relative;
-  display: flex; justify-content: center;
+  flex: 0 0 14px; align-self: stretch; cursor: col-resize; touch-action: none; position: relative;
+  -moz-user-select: none; user-select: none;
 }
 .splitter[hidden] { display: none; }
 .splitter::before {
-  content: ''; width: 2px; margin: 8px 0; border-radius: 1px; background: transparent; transition: background 0.15s;
+  content: ''; position: absolute; top: 8px; bottom: 8px; left: 6px; width: 2px;
+  border-radius: 1px; background: var(--line);
+}
+.splitter::after {
+  content: ''; position: absolute; top: 50%; left: 3px; width: 8px; height: 36px; margin-top: -18px;
+  border-radius: 4px; border: 1px solid var(--line); box-sizing: border-box;
+  background: repeating-linear-gradient(to bottom, var(--muted) 0 1px, transparent 1px 4px) center / 2px 20px no-repeat, var(--panel);
 }
 .splitter:hover::before, .splitter:focus-visible::before, body.resizing .splitter::before { background: var(--accent); }
+.splitter:hover::after, .splitter:focus-visible::after, body.resizing .splitter::after { border-color: var(--accent); }
 .splitter:focus-visible { outline: none; }
 body.resizing { cursor: col-resize; user-select: none; }
 body.resizing iframe, body.resizing .detail, body.resizing .table-wrap { pointer-events: none; }

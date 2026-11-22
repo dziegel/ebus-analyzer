@@ -32,8 +32,12 @@ jobs:
       - name: Browser end-to-end test
         run: |
           npm install --no-save playwright
-          npx playwright install --with-deps chromium
+          npx playwright install --with-deps chromium firefox
           node test/e2e/browser.mjs
+      - name: Browser end-to-end test (Firefox)
+        run: node test/e2e/browser.mjs
+        env:
+          E2E_BROWSER: firefox
       - uses: actions/upload-artifact@v4
         if: always()
         with:

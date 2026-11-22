@@ -165,7 +165,7 @@ the TCP command port therefore needs a bridge (see ARCH-2 and open question Q1).
 | UI-3 | S | Light and dark theme. |
 | UI-4 | S | UI language English; German as second language. |
 | UI-5 | M | The bus participants are shown as buttons: the scanned devices plus all other addresses seen in the traffic. Pressing one shows only telegrams from/to this participant; pressing it again (or "All") shows all. A participant comprises its slave address and the associated master address (slave − 5), e.g. 10/15 for the controller. Broadcasts count as "from" their sender only. |
-| UI-6 | S | The width of the detail panel (decoding, byte analysis, history) is adjustable with a draggable separator between the telegram list and the panel (mouse and touch; arrow keys when focused; double-click restores the default). The width is remembered; the list keeps a minimum width. On phones the panel stays full-screen. |
+| UI-6 | S | The width of the detail panel (decoding, byte analysis, history) is adjustable with a draggable separator between the telegram list and the panel (always visible with a grip; mouse and touch; arrow keys when focused; double-click restores the default). The width is remembered; the list keeps a minimum width. On phones the panel stays full-screen. |
 
 ---
 

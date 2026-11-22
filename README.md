@@ -231,7 +231,8 @@ EBUSD_SRC=../ebusd EBUS_CDN=../ebus.github.io npm test
 `test/e2e/browser.mjs` runs the whole chain in a headless browser (fake ebusd →
 bridge → app → definitions from the CDN → TypeSpec compile in the worker →
 value filter → definition assistant); CI
-runs it and keeps the screenshots as artifact.
+runs it in Chromium and Firefox (`E2E_BROWSER=firefox`) and keeps the
+screenshots as artifact.
 
 The app is plain TypeScript and DOM without a framework or bundler; `tsc`
 compiles `src/` to `web/dist/`. Tests run with Node's built-in test runner and
