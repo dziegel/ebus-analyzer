@@ -70,3 +70,34 @@ test('serves the web app', async () => {
   const traversal = await fetch(`http://127.0.0.1:${BRIDGE_PORT}/..%2Fpackage.json`);
   assert.notEqual(traversal.status, 200);
 });
+
+test('detects an outdated build and shows a banner (bridge)', async () => {
+  const { mkdtempSync, mkdirSync, writeFileSync, utimesSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const { buildProblem } = await import('../bridge/ebusd-bridge.mjs');
+  const root = mkdtempSync(join(tmpdir(), 'ebus-build-'));
+  const web = join(root, 'web');
+  mkdirSync(join(web, 'dist'), { recursive: true });
+  mkdirSync(join(root, 'src'));
+  writeFileSync(join(web, 'index.html'), '<!doctype html><html><body class="x"><p>app</p></body></html>');
+  writeFileSync(join(root, 'src', 'main.ts'), '');
+  assert.match((await buildProblem(web))!, /not been built/);
+  writeFileSync(join(web, 'dist', 'main.js'), '');
+  const t = Date.now() / 1000;
+  utimesSync(join(root, 'src', 'main.ts'), t - 100, t - 100);
+  utimesSync(join(web, 'index.html'), t - 100, t - 100);
+  assert.equal(await buildProblem(web), undefined);
+  utimesSync(join(web, 'index.html'), t + 100, t + 100); // e.g. after git pull
+  assert.match((await buildProblem(web))!, /out of date.*npm run build/);
+  // the page served by the bridge carries the warning
+  const port = BRIDGE_PORT + 1;
+  const p = spawn(process.execPath, ['bridge/ebusd-bridge.mjs', '--port', String(port), '--bind', '127.0.0.1', '--ebusd-port', String(EBUSD_PORT), '--web', web], { stdio: ['ignore', 'pipe', 'pipe'] });
+  try {
+    await new Promise<void>((resolve) => p.stdout!.once('data', () => resolve()));
+    const html = await (await fetch(`http://127.0.0.1:${port}/`)).text();
+    assert.match(html, /<body class="x"><div role="alert"[^>]*>The app is out of date/);
+  } finally {
+    p.kill();
+  }
+});

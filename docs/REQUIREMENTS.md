@@ -160,7 +160,7 @@ the TCP command port therefore needs a bridge (see ARCH-2 and open question Q1).
 
 | ID | Prio | Requirement |
 |----|------|-------------|
-| UI-1 | M | Runs in current Chrome on desktop and Android; layout adapts to phone screens. |
+| UI-1 | M | Runs in current Chrome and Firefox on desktop and Android; layout adapts to phone screens. (Writing back to a local folder, TSP-4, needs Chrome's File System Access API; Firefox uses upload/download.) |
 | UI-2 | M | Filter and full-text search over address, device, message name and hex data. |
 | UI-3 | S | Light and dark theme. |
 | UI-4 | S | UI language English; German as second language. |

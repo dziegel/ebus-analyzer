@@ -12,9 +12,9 @@
 import { createServer } from 'node:http';
 import { connect } from 'node:net';
 import { createHash } from 'node:crypto';
-import { readFile, stat } from 'node:fs/promises';
+import { readFile, readdir, stat } from 'node:fs/promises';
 import { resolve, join, extname, sep, dirname } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const READ_ONLY_COMMANDS = new Set([
   'info', 'state', 'grab', 'scan', 'find', 'listen', 'read', 'help', 'quit', 'encode', 'decode',
@@ -80,6 +80,60 @@ function parseArgs(argv) {
 }
 
 // ---------------------------------------------------------------------------
+// Build check: after `git pull`, the sources (src/, web/index.html) are newer
+// than the compiled app in web/dist until `npm run build` is run. The page and
+// the old script then do not match (e.g. new markup is never activated).
+
+async function newestMtime(dir) {
+  let newest = 0;
+  let entries;
+  try {
+    entries = await readdir(dir, { withFileTypes: true });
+  } catch {
+    return 0;
+  }
+  for (const e of entries) {
+    const p = join(dir, e.name);
+    if (e.isDirectory()) newest = Math.max(newest, await newestMtime(p));
+    else if (/\.ts$/.test(e.name)) newest = Math.max(newest, (await stat(p)).mtimeMs);
+  }
+  return newest;
+}
+
+/** undefined if the app is up to date (or there are no sources next to it), else a message. */
+export async function buildProblem(webRoot) {
+  const src = join(webRoot, '..', 'src');
+  const sources = await newestMtime(src);
+  if (!sources) return undefined;
+  let html = 0;
+  try {
+    html = (await stat(join(webRoot, 'index.html'))).mtimeMs;
+  } catch {
+    // no page: nothing to compare
+  }
+  let built;
+  try {
+    built = (await stat(join(webRoot, 'dist', 'main.js'))).mtimeMs;
+  } catch {
+    return 'The app has not been built yet: run "npm run build" in the ebus-analyzer folder.';
+  }
+  if (Math.max(sources, html) > built + 1000) {
+    return 'The app is out of date (sources changed since the last build): run "npm run build" in the ebus-analyzer folder and reload.';
+  }
+  return undefined;
+}
+
+let lastBuildWarning = '';
+async function checkBuild(webRoot) {
+  const problem = await buildProblem(webRoot).catch(() => undefined);
+  if (problem && problem !== lastBuildWarning) console.warn(`[bridge] WARNING: ${problem}`);
+  lastBuildWarning = problem ?? '';
+  return problem;
+}
+
+const escHtml = (s) => s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
+
+// ---------------------------------------------------------------------------
 // Static files
 
 async function serveStatic(webRoot, req, res) {
@@ -94,7 +148,14 @@ async function serveStatic(webRoot, req, res) {
   try {
     const info = await stat(file);
     if (!info.isFile()) throw new Error('not a file');
-    const body = await readFile(file);
+    let body = await readFile(file);
+    if (extname(file) === '.html') {
+      const problem = await checkBuild(webRoot);
+      if (problem) {
+        const banner = `<div role="alert" style="background:#b3261e;color:#fff;padding:10px 16px;font:14px system-ui,sans-serif">${escHtml(problem)}</div>`;
+        body = Buffer.from(body.toString('utf8').replace(/<body([^>]*)>/i, (m) => m + banner));
+      }
+    }
     res.writeHead(200, {
       'content-type': MIME[extname(file)] ?? 'application/octet-stream',
       'cache-control': 'no-cache',
@@ -308,7 +369,9 @@ function main() {
     console.log(`[bridge] web app:   http://${opts.bind === '0.0.0.0' ? 'localhost' : opts.bind}:${opts.port}/`);
     console.log(`[bridge] websocket: /ebusd -> ebusd ${opts.ebusdHost}:${opts.ebusdPort}`);
     console.log(`[bridge] write commands ${opts.allowWrite ? 'ENABLED' : 'blocked (read-only)'}`);
+    void checkBuild(opts.web);
   });
 }
 
-main();
+// run as a program (the module is also imported by tests)
+if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) main();

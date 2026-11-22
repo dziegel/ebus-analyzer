@@ -176,8 +176,18 @@ npm run build
 node bridge/ebusd-bridge.mjs --ebusd-host <ebusd-host>
 ```
 
-Then open `http://<bridge-host>:8080/` in Chrome (PC or phone). The app
-connects automatically when it is served by the bridge.
+Then open `http://<bridge-host>:8080/` in Chrome or Firefox (PC or phone).
+The app connects automatically when it is served by the bridge.
+
+To update, rebuild after pulling; the bridge serves the compiled app from
+`web/dist`, and until it is rebuilt the page shows a red warning (also logged
+by the bridge):
+
+```sh
+git pull
+npm install
+npm run build
+```
 
 Bridge options (`--help`):
 
