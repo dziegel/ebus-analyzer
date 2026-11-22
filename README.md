@@ -12,7 +12,8 @@ Browser tool that simplifies reverse engineering of eBUS traffic using
   value search, charts over time, notes and tags
 - Reads, edits and compiles eBUS TypeSpec in the browser with the official
   TypeSpec compiler and ebus-typespec, and writes TypeSpec from definitions
-- Planned: an assistant that drafts TypeSpec for unknown telegrams
+- Planned: a value filter for the list (enter a value from the display, see only
+  telegrams that contain it) and an assistant that drafts TypeSpec for unknown telegrams
 
 Status: milestones M1 (capture), M2 (decoding), M3 (analysis) and M4 (TypeSpec) done. See [docs/REQUIREMENTS.md](docs/REQUIREMENTS.md).
 

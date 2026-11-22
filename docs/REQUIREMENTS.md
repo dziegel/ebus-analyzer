@@ -1,6 +1,6 @@
 # EBus Analyzer – Requirements
 
-Status: Draft · Last updated: 2026-11-19 · Implemented: M1, M2, M3, M4, UI-5
+Status: Draft · Last updated: 2026-11-22 · Implemented: M1, M2, M3, M4, UI-5
 
 EBus Analyzer is a browser application that receives eBUS telegrams from
 [ebusd](https://github.com/john30/ebusd), decodes them using the message
@@ -127,6 +127,8 @@ the TCP command port therefore needs a bridge (see ARCH-2 and open question Q1).
 | UNK-8 | S | Plot candidate byte ranges over time to correlate them with known events (e.g. compressor start). |
 | UNK-9 | S | Users can annotate, tag or ignore message keys; annotations are persisted and exportable. |
 | UNK-10 | C | Correlate unknown fields with decoded values of known messages. |
+| UNK-11 | M | Value filter for the telegram list: the user enters a value read on the heat pump's display (a number with "," or "." as decimal separator and an optional unit, e.g. "45,5 °C", or a text). The list then shows only messages for which some decoding at some byte position yields this value: the decoded fields of known messages and all candidate data types (as in UNK-7) at every byte position of the master data and the response. Numbers match within a tolerance derived from the digits entered (e.g. 45.5 → ±0.05), which the user can change. Each remaining row shows where and how the value was found (bytes, data type, decoded value). The result updates as new telegrams arrive; the filter combines with the other filters, the search and the participant filter (UI-5); clearing it shows all messages again. |
+| UNK-12 | S | The value filter can optionally include older payloads from the history (UNK-5), so that a value shown on the display a moment ago is still found. |
 
 ### 4.4 TypeSpec read/write (TSP)
 
@@ -177,6 +179,7 @@ the TCP command port therefore needs a bridge (see ARCH-2 and open question Q1).
 | NFR-5 | M | Writing to the bus is disabled by default and needs an explicit opt-in. |
 | NFR-6 | S | Automated build, tests and deployment via GitHub Actions. |
 | NFR-7 | S | Decoder output is verified against ebusd's own decoding for a reference set of telegrams. |
+| NFR-8 | M | The value filter (UNK-11) updates the list within 0.5 s for 1,000 captured messages (latest payloads). |
 
 ---
 
@@ -212,6 +215,7 @@ the TCP command port therefore needs a bridge (see ARCH-2 and open question Q1).
 4. **M4 – TypeSpec I/O:** import, compile, export (TSP-1…7)
 5. **M5 – Assistant:** draft models from unknown telegrams (ASS-1…7)
 6. **M6 – Live test:** `define` / `hex` integration (CON-7, CON-8, ASS-8)
+7. **M7 – Value filter:** filter the telegram list by a value read on the display (UNK-11, UNK-12, NFR-8). Builds on the value search of M3 and does not depend on M5/M6, so it can be done first.
 
 ---
 
