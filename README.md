@@ -155,9 +155,10 @@ definition file or ident (e.g. `hmu`).
 - **Save draft** stores the draft in the browser (and in exports). Saved
   drafts without errors decode immediately and take precedence over all other
   definitions.
-- **Save to TypeSpec project** writes all drafts as `assistant/ZZ.circuit.tsp`
-  into the TypeSpec project (one file per device and circuit), where they can
-  be compiled, edited and saved to the folder.
+- **Save to TypeSpec project** writes all drafts into the folder `assistant/`
+  of the TypeSpec project, one file per device and circuit named like in
+  ebusd-configuration (`08.hmu.tsp`, `broadcast.tsp`), where they can be
+  compiled, edited and saved to the folder.
 
 ## Quick start
 

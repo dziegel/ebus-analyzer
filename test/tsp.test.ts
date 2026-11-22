@@ -12,7 +12,7 @@ import { parseDefinitionFile, type MessageDef } from '../src/defs/definitions.ts
 import { defaultsFor } from '../src/defs/loader.ts';
 import { writeTypeSpec } from '../src/tsp/writer.ts';
 import type { LibraryBundle } from '../src/tsp/protocol.ts';
-import { DraftStore } from '../src/assistant/store.ts';
+import { DraftStore, draftTspPath } from '../src/assistant/store.ts';
 import { draftDefinition, type Draft } from '../src/assistant/draft.ts';
 
 let compileProject: typeof import('../src/tsp/compile.ts').compileProject | undefined;
@@ -113,6 +113,9 @@ test('definition drafts of the assistant compile to the same definitions (ASS-4)
       { name: 'mode', part: 'm', offset: 2, type: 'UCH', values: '0=off;1=auto' },
       { name: 'target', part: 'm', offset: 3, type: 'D1C' },
     ] },
+    { ...base, key: 'd', name: 'Status', circuit: 'controller', direction: 'r', zz: 0x15, pb: 0xb5, sb: 0x09, id: [0x0d, 0x01], fields: [
+      { name: 'on', part: 's', offset: 0, type: 'UCH', values: '0=no;1=yes' },
+    ] },
     { ...base, key: 'c', name: 'Info', circuit: 'broadcast', direction: 'u', zz: 0xfe, pb: 0xb5, sb: 0x16, id: [0x08], fields: [
       { name: 'text', part: 'm', offset: 1, type: 'STR:5' },
       { name: 'time', part: 'm', offset: 6, type: 'HTM' },
@@ -121,13 +124,14 @@ test('definition drafts of the assistant compile to the same definitions (ASS-4)
   const drafts = new DraftStore();
   for (const d of list) drafts.save(d);
   const files = Object.fromEntries(drafts.typeSpecFiles());
-  assert.deepEqual(Object.keys(files).sort(), ['assistant/08.hmu.tsp', 'assistant/fe.broadcast.tsp']);
-  const named = (d: MessageDef) => summary({ ...d, fields: d.fields.filter((f) => !/^IGN/i.test(f.typeName)) });
+  assert.deepEqual(Object.keys(files).sort(), ['assistant/08.hmu.tsp', 'assistant/15.drafts.tsp', 'assistant/broadcast.tsp']);
+  // circuit names are case-insensitive in ebusd (the emitter writes the namespace name)
+  const named = (d: MessageDef) => summary({ ...d, circuit: d.circuit.toLowerCase(), fields: d.fields.filter((f) => !/^IGN/i.test(f.typeName)) });
   for (const [path, tsp] of Object.entries(files)) {
     const r = await compileProject!({ files: { [path]: tsp }, entry: path }, libraries);
     assert.deepEqual(r.diagnostics.filter((d) => d.severity === 'error'), [], tsp);
     const back = parseOutputs(r.csv).flatMap((o) => o.parsed.messages);
-    const expected = list.filter((d) => path.includes(`.${d.circuit}.`)).map((d) => draftDefinition(d));
+    const expected = list.filter((d) => draftTspPath(d.zz, d.circuit) === path).map((d) => draftDefinition(d));
     assert.deepEqual(back.map(named).sort(), expected.map(named).sort(), `${tsp}\n---\n${Object.values(r.csv).join('\n')}`);
   }
 });
