@@ -144,7 +144,8 @@ try {
   await page.click('#btn-settings');
   await page.check('#set-live');
   await page.click('#settings button[value="save"]');
-  await page.click('tr[data-key="1008b5090d5501"]');
+  // the row is still selected from the assistant step (a click would deselect it)
+  await page.waitForSelector('#detail:not([hidden]) [data-action="assistant"]');
   await page.click('#detail [data-action="assistant"]');
   await page.waitForSelector('#assistant[open]');
   const liveLog = () => page.textContent('#as-live');
