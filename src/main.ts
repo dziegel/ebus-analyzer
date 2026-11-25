@@ -48,7 +48,8 @@ import { initSplitter } from './ui/splitter.ts';
 import { createDraft, defaultCircuit, draftCsvLine, draftDefinition, setIdLength, validateDraft, type Direction, type Draft, type DraftField, type Issue } from './assistant/draft.ts';
 import { DraftStore, DRAFTS_PATH, TSP_MARKER, draftTspPath } from './assistant/store.ts';
 import { parseFilename } from './defs/select.ts';
-import { renderDraftBytes, renderDraftFields, renderDraftHead, renderDraftSamples, renderDraftSelection, renderIssues, type DraftSelection } from './ui/assistant.ts';
+import { renderDraftBytes, renderDraftFields, renderDraftHead, renderDraftSamples, renderDraftSelection, renderIssues, renderLiveLog, type DraftSelection, type LiveEntry } from './ui/assistant.ts';
+import { decodeChecks, defineCommand, explainError, findCommand, hexOfSample, isError, parseFind, parseHexTelegram, readCommand, readProblem } from './ebusd/live.ts';
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 
@@ -146,6 +147,7 @@ function viewContext(): DetailContext {
     annotations,
     charted: new Set(chartSources.map(seriesId)),
     hasDraft: (key: string) => !!drafts.get(key),
+    liveCommands: settings.liveCommands,
     telegram: entryTelegram,
     decodeSample: (e: Entry, i: number) => {
       const s = e.history[i];
@@ -205,6 +207,7 @@ capture.onChange(() => {
   scheduleRender();
 });
 client.onStateChange((_state, detail) => {
+  updateLiveButtons();
   stateDetail = detail;
   scheduleRender();
 });
@@ -394,6 +397,7 @@ const dialog = $('settings') as HTMLDialogElement;
 $('btn-settings').addEventListener('click', () => {
   ($('set-url') as HTMLInputElement).value = settings.bridgeUrl;
   ($('set-interval') as HTMLInputElement).value = String(settings.pollIntervalMs / 1000);
+  ($('set-live') as HTMLInputElement).checked = settings.liveCommands;
   dialog.showModal();
 });
 dialog.addEventListener('close', () => {
@@ -403,8 +407,12 @@ dialog.addEventListener('close', () => {
   const urlChanged = url !== settings.bridgeUrl;
   settings.bridgeUrl = url || settings.bridgeUrl;
   if (seconds >= 1) settings.pollIntervalMs = Math.round(seconds * 1000);
+  settings.liveCommands = ($('set-live') as HTMLInputElement).checked;
   capture.intervalMs = settings.pollIntervalMs;
   saveSettings(settings);
+  detailEl.dataset.key = '';
+  scheduleRender();
+  updateLiveButtons();
   if (urlChanged && client.state !== 'disconnected') connect();
 });
 
@@ -534,6 +542,9 @@ detailEl.addEventListener('click', (ev) => {
       }
       case 'assistant':
         openAssistant(entry);
+        break;
+      case 'hexsend':
+        openHexSend(entry);
         break;
     }
   }
@@ -998,6 +1009,10 @@ function openAssistant(e: Entry): void {
   asDirty = false;
   asSel = undefined;
   $('as-telegram').textContent = `${hex2(e.source)} → ${hex2(e.target)} · ${hex2(e.pb)} ${hex2(e.sb)} ${e.id} · ${e.history.length} samples`;
+  if (liveFor !== e.key) {
+    liveLog = [];
+    liveFor = e.key;
+  }
   $('as-head').innerHTML = renderDraftHead(asDraft, e);
   renderAssistant(true);
   asDialog.showModal();
@@ -1036,6 +1051,7 @@ function renderAssistant(fields: boolean): void {
   ($('as-preview') as HTMLTextAreaElement).value = preview;
   $('as-csv').textContent = csv;
   ($('as-delete') as HTMLButtonElement).disabled = !drafts.get(d.key);
+  updateLiveButtons();
 }
 
 function changeDraft(fields = false): void {
@@ -1191,7 +1207,209 @@ asDialog.addEventListener('cancel', (ev) => {
 });
 asDialog.addEventListener('close', () => {
   asEntry = undefined;
+  stopWatch();
   scheduleRender();
+});
+
+// ---------------------------------------------------------------------------
+// Live test with ebusd (M6: CON-8, ASS-8)
+
+let liveLog: LiveEntry[] = [];
+let liveFor = '';
+let liveBusy = false;
+/** Message defined in ebusd whose value is followed with find. */
+let watch: { key: string; draft: Draft; timer: ReturnType<typeof setInterval>; until: number } | undefined;
+
+function addLive(entry: Omit<LiveEntry, 't'>): void {
+  liveLog.push({ t: Date.now(), ...entry });
+  if (liveLog.length > 50) liveLog.splice(0, liveLog.length - 50);
+  $('as-live').innerHTML = renderLiveLog(liveLog);
+}
+
+/** Error entry for an ebusd answer, with an explanation if known. */
+function liveError(text: string, command: string, answer: readonly string[]): Omit<LiveEntry, 't'> {
+  const hint = explainError(answer[0] ?? '', command);
+  return { state: 'bad', text, details: [answer.join(' ') || '(no answer)', ...(hint ? [hint] : [])], commands: [command] };
+}
+
+function updateLiveButtons(): void {
+  const connected = client.state === 'connected';
+  const d = asDraft;
+  let valid = false;
+  if (d) {
+    try {
+      draftDefinition(d);
+      valid = d.fields.length > 0;
+    } catch {
+      valid = false;
+    }
+  }
+  const why = !connected ? 'Not connected to ebusd' : !valid ? 'The draft has no valid fields yet' : '';
+  const set = (name: string, extra: string) => {
+    const b = document.querySelector<HTMLButtonElement>(`[data-live="${name}"]`);
+    if (!b) return;
+    const reason = why || extra;
+    b.disabled = liveBusy || !!reason;
+    b.dataset.title ??= b.title;
+    b.title = reason || b.dataset.title;
+  };
+  const optIn = settings.liveCommands ? '' : 'Enable "Allow commands that send to the bus or change ebusd" in the settings';
+  set('decode', '');
+  set('define', optIn);
+  set('read', optIn || (d ? (readProblem(d) ?? '') : ''));
+}
+
+async function liveCommand(command: string): Promise<string[]> {
+  return client.command(command);
+}
+
+/** ebusd decodes the last distinct payloads with the draft; compare with the app (decode, no bus traffic). */
+async function liveCompare(d: Draft, e: Entry): Promise<void> {
+  const seen = new Set<string>();
+  const samples = e.history.slice().reverse().filter((s) => {
+    const k = `${s.master}/${s.slave}`;
+    if (seen.has(k)) return false;
+    seen.add(k);
+    return true;
+  }).slice(0, 10);
+  let compared = 0;
+  const diffs: string[] = [];
+  const commands: string[] = [];
+  for (const s of samples) {
+    for (const c of decodeChecks(d, e, s)) {
+      const answer = await liveCommand(c.command);
+      compared++;
+      if (c.error ? !isError(answer) : answer.join('\n') !== c.expected) {
+        if (isError(answer) && !c.error && /not found|blocked|not enabled/.test(answer[0]!)) {
+          addLive(liveError('ebusd could not decode', c.command, answer));
+          return;
+        }
+        diffs.push(`${timestamp(s.t)} ${c.part === 'm' ? 'data' : 'response'}: ebusd ${answer.join(' ')} · app ${c.expected}`);
+        if (commands.length < 3) commands.push(c.command);
+      }
+    }
+  }
+  if (!compared) addLive({ state: 'warn', text: 'Nothing to compare: no payloads with data for the fields.' });
+  else if (!diffs.length) addLive({ state: 'ok', text: `ebusd decodes ${samples.length} payload${samples.length === 1 ? '' : 's'} exactly like the app.` });
+  else addLive({ state: 'bad', text: `ebusd decodes ${diffs.length} of ${compared} differently:`, details: diffs.slice(0, 5), commands });
+}
+
+async function liveDefine(d: Draft, e: Entry): Promise<void> {
+  if (!confirm(`Add the draft ${d.circuit}.${d.name} to ebusd?\n\nebusd keeps it until it is restarted and then decodes these telegrams itself (other programs using ebusd, e.g. MQTT, see it too). Nothing is sent to the bus.`)) return;
+  let command = defineCommand(d);
+  let answer = await liveCommand(command);
+  if (isError(answer) && /duplicate entry/.test(answer[0]!)) {
+    if (!confirm(`ebusd already has a message with this command and ID (or the name ${d.circuit}.${d.name}).\n\nReplace it with the draft until ebusd restarts?`)) {
+      addLive(liveError('Not defined', command, answer));
+      return;
+    }
+    command = defineCommand(d, true);
+    answer = await liveCommand(command);
+  }
+  if (isError(answer) || answer[0] !== 'done') {
+    addLive(liveError('ebusd did not accept the draft', command, answer));
+    return;
+  }
+  addLive({ state: 'ok', text: `Defined in ebusd as ${d.circuit}.${d.name}; following ebusd's value for 10 minutes…`, commands: [command] });
+  startWatch(structuredClone(d), e);
+}
+
+function startWatch(d: Draft, e: Entry): void {
+  stopWatch();
+  const until = Date.now() + 10 * 60_000;
+  const poll = async () => {
+    if (!watch || Date.now() > watch.until || client.state !== 'connected') return stopWatch();
+    const command = findCommand(d);
+    const answer = await liveCommand(command).catch(() => [] as string[]);
+    if (!watch) return;
+    const found = parseFind(answer, d);
+    const last = e.history.at(-1);
+    const app = last ? decodeChecks(d, e, last).map((c) => c.expected).join(' / ') : '';
+    const text = found.value !== undefined ? `ebusd: ${found.value}` : found.noData ? 'ebusd: no data yet (waiting for the telegram)' : `ebusd: ${answer.join(' ') || 'no answer'}`;
+    const state: LiveEntry['state'] = found.value === undefined ? 'warn' : found.value === app ? 'ok' : 'info';
+    // one line for the watched value, updated in place of the previous one
+    liveLog = liveLog.filter((x) => x.commands?.[0] !== command);
+    addLive({ state, text, details: [`app (latest payload): ${app}`], commands: [command] });
+  };
+  watch = { key: e.key, draft: d, until, timer: setInterval(() => void poll(), Math.max(3000, settings.pollIntervalMs)) };
+  void poll();
+}
+
+function stopWatch(): void {
+  if (watch) clearInterval(watch.timer);
+  watch = undefined;
+}
+
+async function liveRead(d: Draft): Promise<void> {
+  const command = readCommand(d);
+  const tel = [d.zz, d.pb, d.sb, d.id.length, ...d.id].map(hex2).join(' ');
+  if (!confirm(`ebusd will send this read request to the bus and decode the answer with the draft:\n\n${tel}\n\nOnly send requests that you have seen on the bus or know to be harmless. Send?`)) return;
+  const answer = await liveCommand(command);
+  if (isError(answer)) addLive(liveError('Reading failed', command, answer));
+  else addLive({ state: 'ok', text: `Read from the bus: ${answer.join(' ')}`, commands: [command] });
+}
+
+document.querySelector('.as-live-head')!.addEventListener('click', (ev) => {
+  const b = (ev.target as HTMLElement).closest<HTMLButtonElement>('[data-live]');
+  const d = asDraft;
+  const e = asEntry;
+  if (!b || !d || !e || liveBusy) return;
+  const run = b.dataset.live === 'decode' ? liveCompare(structuredClone(d), e) : b.dataset.live === 'define' ? liveDefine(structuredClone(d), e) : liveRead(structuredClone(d));
+  liveBusy = true;
+  updateLiveButtons();
+  void run
+    .catch((err: unknown) => addLive({ state: 'bad', text: err instanceof Error ? err.message : String(err) }))
+    .finally(() => {
+      liveBusy = false;
+      updateLiveButtons();
+    });
+});
+// ---------------------------------------------------------------------------
+// Send a telegram with hex (M6: CON-7)
+
+const hexDialog = $('hexsend') as HTMLDialogElement;
+const hexInput = $('hex-input') as HTMLInputElement;
+let hexLog: LiveEntry[] = [];
+
+function checkHexInput(): ReturnType<typeof parseHexTelegram> {
+  const r = parseHexTelegram(hexInput.value);
+  $('hex-check').textContent = 'error' in r ? r.error : `To ${hex2(r.zz)}, command ${hex2(r.pb)} ${hex2(r.sb)}, ${r.data.length} data byte${r.data.length === 1 ? '' : 's'}${r.zz === 0xfe ? ' (broadcast)' : ''}.`;
+  ($('hex-send') as HTMLButtonElement).disabled = 'error' in r || !settings.liveCommands || client.state !== 'connected';
+  return r;
+}
+
+function openHexSend(e: Entry): void {
+  const last = e.history.at(-1);
+  hexInput.value = last ? hexOfSample(e, last).replace(/(..)(?!$)/g, '$1 ') : '';
+  hexLog = [];
+  $('hex-log').innerHTML = '';
+  checkHexInput();
+  hexDialog.showModal();
+  hexInput.focus();
+}
+
+hexInput.addEventListener('input', () => void checkHexInput());
+$('hex-close').addEventListener('click', () => hexDialog.close());
+$('hex-send').addEventListener('click', () => {
+  const r = checkHexInput();
+  if ('error' in r) return;
+  const spaced = r.hex.replace(/(..)(?!$)/g, '$1 ');
+  if (!confirm(`Send this telegram to the bus?\n\n${spaced}\n\nIf it is a write command, it changes the device.`)) return;
+  const command = `hex ${r.hex}`;
+  ($('hex-send') as HTMLButtonElement).disabled = true;
+  void client
+    .command(command)
+    .then((answer) => {
+      const entry: LiveEntry = isError(answer)
+        ? { t: Date.now(), ...liveError('Not sent', command, answer) }
+        : { t: Date.now(), state: 'ok', text: `Answer: ${answer.join(' ')}`, commands: [command] };
+      hexLog.push(entry);
+    })
+    .catch((err: unknown) => hexLog.push({ t: Date.now(), state: 'bad', text: err instanceof Error ? err.message : String(err), commands: [command] }))
+    .finally(() => {
+      $('hex-log').innerHTML = renderLiveLog(hexLog);
+      checkHexInput();
+    });
 });
 
 // ---------------------------------------------------------------------------

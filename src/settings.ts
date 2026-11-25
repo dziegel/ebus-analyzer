@@ -7,6 +7,11 @@ export interface Settings {
   pollIntervalMs: number;
   /** Where message definitions are loaded from. */
   source: SourceSettings;
+  /**
+   * Opt-in (NFR-5) for commands that send telegrams to the bus or change
+   * ebusd: hex, define and read -def of drafts (M6).
+   */
+  liveCommands: boolean;
 }
 
 const STORAGE_KEY = 'ebus-analyzer.settings';
@@ -30,7 +35,7 @@ function parseSource(raw: unknown): SourceSettings {
 }
 
 export function loadSettings(): Settings {
-  const defaults: Settings = { bridgeUrl: defaultBridgeUrl(), pollIntervalMs: 5000, source: { ...DEFAULT_SOURCE } };
+  const defaults: Settings = { bridgeUrl: defaultBridgeUrl(), pollIntervalMs: 5000, source: { ...DEFAULT_SOURCE }, liveCommands: false };
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return defaults;
@@ -42,6 +47,7 @@ export function loadSettings(): Settings {
           ? parsed.pollIntervalMs
           : defaults.pollIntervalMs,
       source: parseSource(parsed.source),
+      liveCommands: parsed.liveCommands === true,
     };
   } catch {
     return defaults;

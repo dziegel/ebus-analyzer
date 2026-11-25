@@ -124,14 +124,14 @@ export function setIdLength(d: Draft, e: Entry, length: number): Draft {
   return { ...d, id: Array.from(master.subarray(0, n)), updated: Date.now() };
 }
 
-function sortFields(fields: readonly DraftField[]): DraftField[] {
+export function sortFields(fields: readonly DraftField[]): DraftField[] {
   return [...fields].sort((a, b) => (a.part === b.part ? 0 : a.part === 'm' ? -1 : 1) || a.offset - b.offset || firstBit(a.type) - firstBit(b.type));
 }
 
 const csvCell = (s: string) => (/[",]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s);
 
-/** CSV column groups for the fields of one part, with IGN fields filling gaps. */
-function fieldGroups(fields: readonly DraftField[], part: Part, start: number): string[][] {
+/** CSV column groups [name, part, type, divisor/values, unit, comment] of one part (fields sorted), with IGN fields filling gaps from `start`. */
+export function fieldGroups(fields: readonly DraftField[], part: Part, start: number): string[][] {
   const groups: string[][] = [];
   let pos = start;
   let lastByte = -1;

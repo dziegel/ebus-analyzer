@@ -6,8 +6,9 @@
 // gets its own TCP connection to ebusd. Text frames from the browser are sent
 // to ebusd as command lines; everything ebusd sends back is relayed unchanged.
 // The bridge does not interpret eBUS data. By default it only lets read-only
-// commands through (see READ_ONLY_COMMANDS); start with --allow-write to lift
-// that restriction.
+// commands through (see blockedCommand); start with --allow-write to also allow
+// commands that send arbitrary telegrams or change ebusd (write, hex, define,
+// read -h / read -def, ...).
 
 import { createServer } from 'node:http';
 import { connect } from 'node:net';
@@ -298,8 +299,20 @@ function acceptWebSocket(req, socket) {
 // ---------------------------------------------------------------------------
 // Relay
 
-function commandVerb(line) {
-  return line.trim().split(/\s+/, 1)[0]?.toLowerCase() ?? '';
+/**
+ * The command a read-only bridge refuses, or undefined. `read` is allowed for
+ * defined messages only: with -h or -def it sends a telegram given by the
+ * client, which may as well be a write.
+ */
+export function blockedCommand(line) {
+  const args = line.trim().split(/\s+/);
+  const verb = args[0]?.toLowerCase() ?? '';
+  if (!READ_ONLY_COMMANDS.has(verb)) return verb;
+  if (verb === 'read') {
+    const opt = args.slice(1).find((a) => a === '-h' || a === '-def');
+    if (opt) return `read ${opt}`;
+  }
+  return undefined;
 }
 
 function relay(opts, req, socket) {
@@ -314,9 +327,9 @@ function relay(opts, req, socket) {
     (message) => {
       for (const line of message.split(/\r?\n/)) {
         if (line.trim() === '') continue;
-        const verb = commandVerb(line);
-        if (!opts.allowWrite && !READ_ONLY_COMMANDS.has(verb)) {
-          ws.sendText(`ERR: command "${verb}" blocked by bridge (start bridge with --allow-write)\n\n`);
+        const blocked = opts.allowWrite ? undefined : blockedCommand(line);
+        if (blocked !== undefined) {
+          ws.sendText(`ERR: command "${blocked}" blocked by bridge (start bridge with --allow-write)\n\n`);
           continue;
         }
         tcp.write(line + '\n');

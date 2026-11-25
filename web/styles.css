@@ -386,3 +386,18 @@ dialog.full[open] { display: flex; flex-direction: column; gap: 8px; }
   .as-side { flex: 0 0 auto; }
   .as-main { overflow: visible; }
 }
+
+/* Live test (M6) */
+label.check { flex-direction: row; align-items: center; gap: 8px; }
+label.check input { width: auto; }
+.as-live { border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; display: flex; flex-direction: column; gap: 6px; }
+.as-live-head { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.as-live-head b { margin-right: auto; }
+.as-live-log { font-size: 12px; display: flex; flex-direction: column; gap: 4px; max-height: 220px; overflow: auto; }
+.as-live-log:empty { display: none; }
+.live-entry { padding: 4px 6px; border-radius: 4px; border-left: 3px solid var(--line); background: var(--bg); }
+.live-entry.ok { border-color: var(--ok); }
+.live-entry.bad { border-color: var(--new); }
+.live-entry.warn { border-color: var(--warn); }
+.live-entry code { word-break: break-all; }
+.live-entry .cmd { color: var(--muted); font-family: ui-monospace, monospace; font-size: 11px; word-break: break-all; }

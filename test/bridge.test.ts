@@ -51,6 +51,20 @@ test('relays commands and responses in order', async () => {
   }
 });
 
+test('read-only bridge blocks commands that send given telegrams or change ebusd', async () => {
+  const { blockedCommand } = await import('../bridge/ebusd-bridge.mjs');
+  for (const ok of ['info', 'grab result all', 'read -c hmu FlowTemp', 'read -f -m 10 Status01', 'find -c hmu Live', "decode -m IGN:1,,,,D2B,,, 01803f", 'scan result']) {
+    assert.equal(blockedCommand(ok), undefined, ok);
+  }
+  assert.equal(blockedCommand('hex 08b509030d5501'), 'hex');
+  assert.equal(blockedCommand("define 'r,hmu,X,,,08,b509,0d5501,,s,UCH,,,'"), 'define');
+  assert.equal(blockedCommand("read -def 'r,hmu,X,,,08,b509,0d5501,,s,UCH,,,'"), 'read -def');
+  assert.equal(blockedCommand('read -h 08b509030d5501'), 'read -h');
+  assert.equal(blockedCommand('write -c hmu SetMode 1'), 'write');
+  assert.equal(blockedCommand('r -h 08b509030d5501'), 'r');
+  assert.equal(blockedCommand('inject 1008b5090100/00'), 'inject');
+});
+
 test('blocks write commands unless --allow-write', async () => {
   const client = await connectedClient();
   try {

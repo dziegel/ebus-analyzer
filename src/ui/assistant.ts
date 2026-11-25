@@ -167,3 +167,29 @@ export function renderIssues(issues: readonly Issue[], saved: 'saved' | 'changed
   const list = issues.map((i) => `<div class="issue ${i.level}">${esc(i.message)}</div>`).join('');
   return state + (errors ? '' : issues.some((i) => i.level !== 'info') ? '' : '<div class="issue ok">No problems found in the captured samples.</div>') + list;
 }
+
+/** One result of a live-test command (M6). */
+export interface LiveEntry {
+  t: number;
+  /** ok: as expected; bad: differs/failed; warn: no result yet; info: neutral. */
+  state: 'ok' | 'bad' | 'warn' | 'info';
+  text: string;
+  /** Commands sent, shown small. */
+  commands?: string[];
+  /** Further lines (answers, differences, hints). */
+  details?: string[];
+}
+
+export function renderLiveLog(entries: readonly LiveEntry[]): string {
+  return entries
+    .slice()
+    .reverse()
+    .map(
+      (e) =>
+        `<div class="live-entry ${e.state}"><div><span class="muted">${timestamp(e.t)}</span> ${esc(e.text)}</div>` +
+        (e.details ?? []).map((d) => `<div>${esc(d)}</div>`).join('') +
+        (e.commands ?? []).map((c) => `<div class="cmd">${esc(c)}</div>`).join('') +
+        `</div>`,
+    )
+    .join('');
+}

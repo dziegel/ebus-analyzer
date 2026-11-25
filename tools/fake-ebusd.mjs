@@ -1,12 +1,22 @@
 #!/usr/bin/env node
 // Minimal stand-in for the ebusd TCP command port, for development and tests
 // without a real heating system. Answers info, scan result, grab and
-// grab result [all] with simulated Vaillant-like traffic that changes over time.
+// grab result [all] with simulated Vaillant-like traffic that changes over time,
+// and, like an ebusd started with --enablehex --enabledefine, the live-test
+// commands decode, define, find, read -def and hex (decoded with the app's own
+// decoder; the real ebusd is used for that in test/ebusd-live.test.ts).
 //
 //   node tools/fake-ebusd.mjs [--port 8888]
 
 import { createServer } from 'node:net';
 import { pathToFileURL } from 'node:url';
+import { parseDefinitionFile } from '../src/defs/definitions.ts';
+import { decodeFields, ebusdText } from '../src/defs/fields.ts';
+import { hexToBytes } from '../src/ebus/hex.ts';
+import { parseFieldList, splitArgs } from '../src/ebusd/live.ts';
+
+/** ebusd's default columns for definitions given on the command line (no level). */
+const DEF_HEADER = 'type,circuit,name,comment,qq,zz,pbsb,id,*name,part,type,divisor/values,unit,comment';
 
 const hex = (n, bytes = 1) => n.toString(16).padStart(bytes * 2, '0');
 /** Little-endian hex of an integer. */
@@ -51,8 +61,33 @@ function format(lines) {
   return lines.map((l) => `${l.m}${l.s ? ` / ${l.s}` : ''} = ${l.c}`).join('\n');
 }
 
+/** Parses a definition given to define / read -def. */
+function parseDef(text) {
+  const parsed = parseDefinitionFile(`${DEF_HEADER}\n${text}`, 'tcp', {});
+  return parsed.errors.length || parsed.messages.length !== 1 ? undefined : parsed.messages[0];
+}
+
+/** The current simulated telegram for a definition, split into master data and slave data. */
+function telegramFor(def, lines) {
+  for (const l of lines) {
+    const m = hexToBytes(l.m);
+    const data = m.subarray(5);
+    if (!def.zz?.includes(m[1]) || m[2] !== def.pb || m[3] !== def.sb) continue;
+    if (!def.id.every((b, i) => data[i] === b)) continue;
+    return { master: data, slave: l.s ? hexToBytes(l.s).subarray(1) : undefined };
+  }
+  return undefined;
+}
+
+function decodeText(fields, master, slave, idLength) {
+  const r = decodeFields(fields, master, slave, idLength);
+  return r.error ? undefined : ebusdText(r.fields);
+}
+
 export function startFakeEbusd(port = 8888, host = '127.0.0.1') {
   let tick = 0;
+  /** Messages added with define, by "circuit name". */
+  const defined = new Map();
   const server = createServer((socket) => {
     socket.setEncoding('utf8');
     let buffer = '';
@@ -68,7 +103,57 @@ export function startFakeEbusd(port = 8888, host = '127.0.0.1') {
     socket.on('error', () => {});
   });
 
+  function live(cmd) {
+    const args = splitArgs(cmd);
+    const verb = args[0]?.toLowerCase();
+    const lines = simulatedTelegrams(tick);
+    if (verb === 'decode') {
+      const master = args[1] === '-m';
+      const [list, data] = args.slice(master ? 2 : 1);
+      if (!list || !data) return 'usage: decode [-v|-V] [-m] [-n|-N] DEFINITION DD[DD]*';
+      const fields = parseFieldList(list, master ? 'm' : 's');
+      const bytes = hexToBytes(data);
+      const text = master ? decodeText(fields, bytes, undefined, 0) : decodeText(fields, new Uint8Array(0), bytes, 0);
+      return text ?? 'ERR: argument value out of valid range';
+    }
+    if (verb === 'define') {
+      const replace = args[1] === '-r';
+      const def = parseDef(args[replace ? 2 : 1] ?? '');
+      if (!def) return 'ERR: invalid argument';
+      const name = `${def.circuit} ${def.name}`.toLowerCase();
+      const same = [...defined.entries()].find(([, d]) => d.zz?.join() === def.zz?.join() && d.pb === def.pb && d.sb === def.sb && d.id.join() === def.id.join());
+      if ((defined.has(name) || same) && !replace) return 'ERR: duplicate entry';
+      if (same) defined.delete(same[0]);
+      defined.set(name, def);
+      return 'done';
+    }
+    if (verb === 'find' && args[1] === '-c' && args.length === 4) {
+      const def = defined.get(`${args[2]} ${args[3]}`.toLowerCase());
+      if (!def) return 'ERR: element not found';
+      const t = telegramFor(def, lines);
+      const text = t && decodeText(def.fields, t.master, t.slave, def.id.length);
+      return `${def.circuit} ${def.name} = ${text ?? 'no data stored'}`;
+    }
+    if (verb === 'read' && args[1] === '-def') {
+      const def = parseDef(args[2] ?? '');
+      if (!def) return 'ERR: bad definition';
+      const t = telegramFor(def, lines);
+      if (!t?.slave) return 'ERR: read timeout';
+      const r = decodeFields(def.fields, t.master, t.slave, def.id.length);
+      return r.error ? 'ERR: argument value out of valid range' : ebusdText(r.fields.filter((f) => f.part === 's'));
+    }
+    if (verb === 'hex') {
+      const hex = (args[1] ?? '').toLowerCase();
+      if (hex.startsWith('fe')) return 'done broadcast';
+      const l = lines.find((x) => x.m.slice(2) === hex);
+      return l?.s ? l.s : 'ERR: read timeout';
+    }
+    return undefined;
+  }
+
   function answer(cmd) {
+    const result = live(cmd);
+    if (result !== undefined) return result;
     switch (cmd) {
       case 'info':
         return 'version: ebusd 25.1.fake\nsignal: acquired\naddress 31: master #8, ebusd';

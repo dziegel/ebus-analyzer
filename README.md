@@ -16,9 +16,11 @@ Browser tool that simplifies reverse engineering of eBUS traffic using
   TypeSpec compiler and ebus-typespec, and writes TypeSpec from definitions
 - Definition assistant: turns an unknown telegram into a definition with type
   suggestions, checks it against all captured payloads and writes TypeSpec
-- Planned: live test of drafts against ebusd (M6)
+- Live test with ebusd: ebusd decodes the captured payloads with a draft,
+  takes the draft as a definition (`define`) or reads it from the bus; sends
+  telegrams with `hex` (opt-in, every telegram confirmed)
 
-Status: milestones M1 (capture), M2 (decoding), M3 (analysis), M4 (TypeSpec), M5 (assistant) and M7 (value filter) done. See [docs/REQUIREMENTS.md](docs/REQUIREMENTS.md).
+Status: milestones M1 (capture), M2 (decoding), M3 (analysis), M4 (TypeSpec), M5 (assistant), M6 (live test) and M7 (value filter) done. See [docs/REQUIREMENTS.md](docs/REQUIREMENTS.md).
 
 ## How it works
 
@@ -32,8 +34,9 @@ app. The app polls `grab result all` and `grab result` to collect telegrams and
 to tell known from unknown messages.
 
 By default the bridge only relays read-only commands (`info`, `grab`, `scan`,
-`read`, `find`, …). Commands that can write to the bus (`write`, `hex`,
-`define`, …) are blocked unless the bridge is started with `--allow-write`.
+`read` of defined messages, `find`, `decode`, …). Commands that send a telegram
+given by the client or change ebusd (`write`, `hex`, `define`, `read -h`,
+`read -def`, …) are blocked unless the bridge is started with `--allow-write`.
 
 ## Decoding
 
@@ -164,6 +167,35 @@ definition file or ident (e.g. `hmu`).
   ebusd-configuration (`08.hmu.tsp`, `broadcast.tsp`), where they can be
   compiled, edited and saved to the folder.
 
+## Live test with ebusd
+
+The section **Live test with ebusd** of the definition assistant checks a draft
+against the real ebusd:
+
+- **Compare** – ebusd decodes the last (up to 10) distinct captured payloads
+  with the draft's fields (`decode`, no bus traffic); the app reports whether
+  ebusd gets the same values.
+- **Define in ebusd** – adds the draft to ebusd (`define`) until ebusd is
+  restarted. ebusd then decodes the telegrams itself; the app shows ebusd's
+  value (`find`) next to its own for 10 minutes. If ebusd already has a
+  message with this command and ID, the app asks before replacing it
+  (`define -r`).
+- **Read now** – for read drafts: ebusd sends the request to the bus and
+  decodes the answer with the draft (`read -def`).
+
+**Send telegram…** in the detail panel sends a telegram with `hex`, prefilled
+with the captured one (e.g. to try other register IDs), and shows the answer.
+
+Writing to the bus is off by default (NFR-5). These commands need:
+
+- the setting **Allow commands that send to the bus or change ebusd** (Compare
+  works without it),
+- the bridge with `--allow-write`,
+- ebusd with `--enabledefine` (define, read -def) or `--enablehex` (hex).
+
+Every command that sends a telegram (read -def, hex) and every define is
+confirmed in a dialog that shows what is sent.
+
 ## Quick start
 
 Requirements: Node.js 22.18 or newer, a running ebusd.
@@ -197,7 +229,7 @@ Bridge options (`--help`):
 | `--bind` | 0.0.0.0 | Listen address (use 127.0.0.1 to keep it local) |
 | `--ebusd-host` | 127.0.0.1 | ebusd host |
 | `--ebusd-port` | 8888 | ebusd TCP command port |
-| `--allow-write` | off | Also relay commands that write to the bus |
+| `--allow-write` | off | Also relay commands that send given telegrams or change ebusd (`write`, `hex`, `define`, `read -def`, …) |
 
 Telegram grabbing is started by the app (`grab`). It is enabled by default in
 current ebusd versions.
@@ -233,6 +265,11 @@ EBUSD_SRC=../ebusd EBUS_CDN=../ebus.github.io npm test
 ```
 
 - `EBUSD_SRC`: runs ebusd's data type test vectors (`test_data.cpp`) through the decoder.
+- `EBUSD_BIN` (an ebusd binary, e.g. built with
+  `cmake -S ../ebusd -B ../ebusd-build -Dmqtt=OFF -Dknx=OFF -Dssl=OFF && cmake --build ../ebusd-build --target ebusd`):
+  starts it without a bus and checks the live-test commands against it
+  (`decode` of drafts gives the same values as the app; `define`, `inject`,
+  `find`).
 - `EBUS_CDN`: loads the real definitions for a Vaillant heat pump and decodes
   the simulated traffic of `tools/fake-ebusd.mjs`.
 - `EBUSD_CONFIG` (a clone of ebusd-configuration) with the npm packages
@@ -240,7 +277,7 @@ EBUSD_SRC=../ebusd EBUS_CDN=../ebus.github.io npm test
 
 `test/e2e/browser.mjs` runs the whole chain in a headless browser (fake ebusd →
 bridge → app → definitions from the CDN → TypeSpec compile in the worker →
-value filter → definition assistant); CI
+value filter → definition assistant → live test → hex); CI
 runs it in Chromium and Firefox (`E2E_BROWSER=firefox`) and keeps the
 screenshots as artifact.
 
@@ -251,7 +288,7 @@ type stripping.
 | Path | Content |
 |------|---------|
 | `src/ebus/` | eBUS addresses, telegram parsing, message keys |
-| `src/ebusd/` | ebusd response parsers, WebSocket client with command queue and reconnect |
+| `src/ebusd/` | ebusd response parsers, WebSocket client with command queue and reconnect, live-test commands |
 | `src/defs/` | eBUS data types, CSV definition parser, conditions, file selection, CDN loader, telegram matching |
 | `src/decoding.ts` | Decodes captured messages with the loaded definitions |
 | `src/analysis/` | Byte statistics, candidate types, value search, time series |

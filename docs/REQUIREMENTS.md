@@ -1,6 +1,6 @@
 # EBus Analyzer – Requirements
 
-Status: Draft · Last updated: 2026-11-22 · Implemented: M1, M2, M3, M4, M5, M7, UI-5, UI-6
+Status: Draft · Last updated: 2026-11-22 · Implemented: M1, M2, M3, M4, M5, M6, M7, UI-5, UI-6
 
 EBus Analyzer is a browser application that receives eBUS telegrams from
 [ebusd](https://github.com/john30/ebusd), decodes them using the message
@@ -66,7 +66,12 @@ Relevant ebusd interfaces:
   `info`. A response ends with an empty line.
 - **HTTP JSON port** (`--httpport`): decoded values and message metadata as JSON.
 - `hex` requires `--enablehex`; `define` and `read/write -def` require
-  `--enabledefine`.
+  `--enabledefine`. `decode` (fields + hex data) works without options.
+- Definitions given on the command line (`define`, `read -def`) use ebusd's
+  default columns without the level column
+  (`type,circuit,name,comment,qq,zz,pbsb,id,fields…`); arguments with spaces
+  are quoted with `'` or `"`. `define` refuses a second message with the same
+  command and ID (`duplicate entry`) unless `-r` is given.
 
 **Architecture constraint:** browsers cannot open raw TCP sockets. Access to
 the TCP command port therefore needs a bridge (see ARCH-2 and open question Q1).
@@ -98,8 +103,8 @@ the TCP command port therefore needs a bridge (see ARCH-2 and open question Q1).
 | CON-4 | M | The app reads ebusd info and `scan result` (address, manufacturer, device ID, SW/HW version) to know which devices are on the bus. |
 | CON-5 | S | The app shows ebusd's own decoding hints (`grab result decode`) next to a telegram. |
 | CON-6 | S | Offline mode: import a previously saved capture or an ebusd log file and analyse it without a live connection. |
-| CON-7 | C | Send a telegram via `hex` for testing. Every write-type telegram requires explicit user confirmation. |
-| CON-8 | C | Send a draft definition to ebusd via `define` / `read -def` to test it live. |
+| CON-7 | C | Send a telegram via `hex` for testing. Every write-type telegram requires explicit user confirmation. (Implemented: every telegram is confirmed.) |
+| CON-8 | C | Send a draft definition to ebusd via `define` / `read -def` to test it live. Also: ebusd decodes captured payloads with the draft (`decode`) for comparison with the app. |
 
 ### 4.2 Decoding (DEC)
 
@@ -177,7 +182,7 @@ the TCP command port therefore needs a bridge (see ARCH-2 and open question Q1).
 | NFR-2 | M | Stores at least 100,000 telegrams locally; older data can be purged by the user. |
 | NFR-3 | M | Initial load (without definitions) under 3 s on a mid-range phone. |
 | NFR-4 | M | No telemetry; no data leaves the browser except requests to ebusd and read-only requests to GitHub. |
-| NFR-5 | M | Writing to the bus is disabled by default and needs an explicit opt-in. |
+| NFR-5 | M | Writing to the bus is disabled by default and needs an explicit opt-in. (App setting plus bridge `--allow-write`; the read-only bridge also blocks `read -h` / `read -def`, which send telegrams given by the client.) |
 | NFR-6 | S | Automated build, tests and deployment via GitHub Actions. |
 | NFR-7 | S | Decoder output is verified against ebusd's own decoding for a reference set of telegrams. |
 | NFR-8 | M | The value filter (UNK-11) updates the list within 0.5 s for 1,000 captured messages (latest payloads). |

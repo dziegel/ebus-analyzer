@@ -17,7 +17,7 @@ const out = `e2e-artifacts/${engine}`;
 mkdirSync(out, { recursive: true });
 const procs = [
   spawn(process.execPath, ['tools/fake-ebusd.mjs', '--port', '28888'], { stdio: 'inherit' }),
-  spawn(process.execPath, ['bridge/ebusd-bridge.mjs', '--port', '28080', '--bind', '127.0.0.1', '--ebusd-port', '28888'], { stdio: 'inherit' }),
+  spawn(process.execPath, ['bridge/ebusd-bridge.mjs', '--port', '28080', '--bind', '127.0.0.1', '--ebusd-port', '28888', '--allow-write'], { stdio: 'inherit' }),
 ];
 const step = (msg) => console.log(`[e2e ${engine}] ${msg}`);
 let failed = false;
@@ -138,6 +138,37 @@ try {
   await page.screenshot({ path: `${out}/7-draft-compiled.png` });
   if (!/Compiled in .*0 errors/.test(draftStatus ?? '')) throw new Error(`draft compile did not succeed: ${draftStatus}`);
   await page.click('#tsp-close');
+
+  step('live test with ebusd (M6): opt in, compare, define, read');
+  page.on('dialog', (d) => void d.accept());
+  await page.click('#btn-settings');
+  await page.check('#set-live');
+  await page.click('#settings button[value="save"]');
+  await page.click('tr[data-key="1008b5090d5501"]');
+  await page.click('#detail [data-action="assistant"]');
+  await page.waitForSelector('#assistant[open]');
+  const liveLog = () => page.textContent('#as-live');
+  await page.click('[data-live="decode"]');
+  await page.waitForFunction(() => /exactly like the app|differently/.test(document.getElementById('as-live')?.textContent ?? ''), null, { timeout: 15_000 });
+  await page.click('[data-live="define"]');
+  await page.waitForFunction(() => /ebusd: -?\d/.test(document.getElementById('as-live')?.textContent ?? ''), null, { timeout: 20_000 });
+  await page.click('[data-live="read"]');
+  await page.waitForFunction(() => /Read from the bus: -?\d/.test(document.getElementById('as-live')?.textContent ?? ''), null, { timeout: 15_000 });
+  const live = await liveLog();
+  step(`live log: ${live?.replace(/\s+/g, ' ').slice(0, 300)}`);
+  if (!/exactly like the app/.test(live ?? '')) throw new Error('ebusd decodes the draft differently');
+  await page.screenshot({ path: `${out}/8-live-test.png` });
+  await page.click('#as-close');
+
+  step('send a telegram with hex (M6, CON-7)');
+  await page.click('#detail [data-action="hexsend"]');
+  await page.waitForSelector('#hexsend[open]');
+  step(`telegram: ${await page.inputValue('#hex-input')}`);
+  await page.click('#hex-send');
+  await page.waitForFunction(() => /Answer: 04/.test(document.getElementById('hex-log')?.textContent ?? ''), null, { timeout: 15_000 });
+  step(`hex: ${(await page.textContent('#hex-log'))?.replace(/\s+/g, ' ')}`);
+  await page.screenshot({ path: `${out}/9-hex.png` });
+  await page.click('#hex-close');
   if (errors.length) throw new Error(`browser errors: ${errors.join('\n')}`);
   step('ok');
 } catch (err) {

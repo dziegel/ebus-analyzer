@@ -23,8 +23,14 @@ jobs:
       - run: git clone --depth 1 https://github.com/eBUS/ebus.github.io ../ebus.github.io
       # the ebusd-configuration revision the CDN files were generated from
       - run: git clone --depth 1 --branch main20260201 https://github.com/john30/ebusd-configuration ../ebusd-configuration
+      # a real ebusd (without a bus) for the live-test commands (M6)
+      - name: Build ebusd
+        run: |
+          cmake -S ../ebusd -B ../ebusd-build -Dmqtt=OFF -Dknx=OFF -Dssl=OFF -DBUILD_TESTING=OFF
+          cmake --build ../ebusd-build --target ebusd -j 4
       - run: npm test
         env:
+          EBUSD_BIN: ../ebusd-build/src/ebusd/ebusd
           EBUSD_SRC: ../ebusd
           EBUS_CDN: ../ebus.github.io
           EBUSD_CONFIG: ../ebusd-configuration

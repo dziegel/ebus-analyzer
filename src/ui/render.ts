@@ -319,6 +319,8 @@ export interface DetailContext extends ViewContext {
   charted?: ReadonlySet<string>;
   /** Whether a definition draft exists for a message (M5). */
   hasDraft?: (key: string) => boolean;
+  /** Commands that send to the bus are enabled in the settings (M6). */
+  liveCommands?: boolean;
 }
 
 /** Number of history rows shown in the detail panel. */
@@ -359,7 +361,8 @@ export function renderDetail(e: Entry | undefined, ctx: DetailContext): string {
     </div>
     ${t ? `<p class="telegram mono">${telegramHtml(t)}</p>` : ''}
     ${decoded ? renderDecoded(decoded, t, e.key, charted) : ctx.definitionsLoaded ? '<p class="muted">No definition matches this message.</p>' : ''}
-    <p><button type="button" class="${decoded ? 'small' : 'primary'}" data-action="assistant">${ctx.hasDraft?.(e.key) ? 'Edit definition draft' : decoded ? 'New definition draft' : 'Create definition'}</button></p>
+    <p><button type="button" class="${decoded ? 'small' : 'primary'}" data-action="assistant">${ctx.hasDraft?.(e.key) ? 'Edit definition draft' : decoded ? 'New definition draft' : 'Create definition'}</button>
+      <button type="button" class="small" data-action="hexsend"${ctx.liveCommands ? '' : ' disabled title="Enable &quot;Allow commands that send to the bus or change ebusd&quot; in the settings"'}>Send telegram…</button></p>
     <dl class="facts">
       <dt>Type</dt><dd>${esc(e.kind)}</dd>
       <dt>From</dt><dd>${hex2(e.source)}${src ? ` (${esc(src)})` : ''}</dd>

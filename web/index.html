@@ -180,10 +180,32 @@
         </div>
         <div class="as-side">
           <div id="as-issues" class="as-issues"></div>
+          <div class="as-live">
+            <div class="as-live-head"><b>Live test with ebusd</b>
+              <button type="button" class="small" data-live="decode" title="ebusd decodes the captured payloads with the draft (decode, no bus traffic)">Compare</button>
+              <button type="button" class="small" data-live="define" title="Add the draft to ebusd until its restart (define); ebusd then decodes the telegrams itself">Define in ebusd</button>
+              <button type="button" class="small" data-live="read" title="ebusd sends the read request and decodes the answer with the draft (read -def)">Read now</button>
+            </div>
+            <div id="as-live" class="as-live-log"></div>
+          </div>
           <div class="as-preview-head"><b>TypeSpec</b> <button type="button" id="as-copy" class="small">Copy</button></div>
           <textarea id="as-preview" class="tsp-view-text" spellcheck="false" wrap="off" readonly aria-label="TypeSpec preview"></textarea>
           <details><summary class="small muted">ebusd CSV</summary><pre id="as-csv" class="small as-csv"></pre></details>
         </div>
+      </div>
+    </dialog>
+
+    <dialog id="hexsend" class="wide" aria-label="Send telegram">
+      <h2>Send telegram</h2>
+      <p class="hint">ebusd sends the telegram with its own source address (<code>hex</code> command) and shows the answer. Writing commands change settings of your heating system: only send what you understand. Each telegram is confirmed before it is sent.</p>
+      <label>Telegram (ZZ PB SB NN DD…)
+        <input id="hex-input" class="mono" spellcheck="false" autocomplete="off" />
+      </label>
+      <p id="hex-check" class="hint"></p>
+      <div id="hex-log" class="as-live-log"></div>
+      <div class="dialog-actions">
+        <button type="button" id="hex-close">Close</button>
+        <button type="button" id="hex-send" class="primary">Send</button>
       </div>
     </dialog>
 
@@ -237,6 +259,8 @@
         <label>Poll interval (seconds)
           <input id="set-interval" type="number" min="1" max="600" step="1" required />
         </label>
+        <label class="check"><input id="set-live" type="checkbox" /> Allow commands that send to the bus or change ebusd</label>
+        <p class="hint">For the live test of drafts (<code>define</code>, <code>read -def</code>) and for sending telegrams (<code>hex</code>). Each command that goes to the bus is confirmed before it is sent. Also needs ebusd with <code>--enabledefine</code> / <code>--enablehex</code> and the bridge with <code>--allow-write</code>.</p>
         <div class="dialog-actions">
           <button value="cancel" formnovalidate>Cancel</button>
           <button value="save" class="primary">Save</button>
