@@ -37,7 +37,13 @@ jobs:
           cd release/ebus-analyzer-*/
           test -f web/dist/main.js && test -f web/dist/tsp-worker.js
           node -e "import('./bridge/ebusd-bridge.mjs').then(async (b) => { const p = await b.buildProblem('web'); if (p) { console.error(p); process.exit(1); } })"
-      - name: Create release
-        run: gh release create "$GITHUB_REF_NAME" "$ZIP" --title "$GITHUB_REF_NAME" --generate-notes
+      # also works if the release was created in the GitHub UI (which creates the tag)
+      - name: Create release or add the ZIP to it
+        run: |
+          if gh release view "$GITHUB_REF_NAME" > /dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" "$ZIP" --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" "$ZIP" --title "$GITHUB_REF_NAME" --generate-notes
+          fi
         env:
           GH_TOKEN: ${{ github.token }}
