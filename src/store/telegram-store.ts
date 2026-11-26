@@ -87,8 +87,13 @@ export class TelegramStore {
   #entries = new Map<string, Entry>();
   /** Last total of ebusd's counters per message key (sum over all lines of that key). */
   #ebusdCounts = new Map<string, number>();
-  /** Last counter per ebusd line (its master telegram), to tell how many telegrams a poll delivered. */
-  #lineCounts = new Map<string, number>();
+  /**
+   * ebusd's counters of the lines of each message key in the last poll. A line
+   * whose counter did not change brings no new telegram: ebusd can keep a stale
+   * line for the same telegram (grabbed under another internal key, e.g. before
+   * its definition was loaded), and its old payload must not enter the history.
+   */
+  #lineCounts = new Map<string, number[]>();
   #listeners = new Set<() => void>();
 
   get size(): number {
@@ -116,34 +121,48 @@ export class TelegramStore {
     // ebusd may report several lines for one of our keys (e.g. a broadcast
     // whose data changes), so occurrences are counted per key: the sum of
     // ebusd's counters over all lines of that key in this batch.
-    const parsed = [];
+    const parsed: Array<{ line: GrabLine; telegram: ReturnType<typeof parseTelegram>; key: string; fresh: boolean }> = [];
     const countTotals = new Map<string, number>();
-    /** Lines per key whose counter increased: the telegrams this poll actually delivers. */
-    const delivered = new Map<string, number>();
+    const batchCounts = new Map<string, number[]>();
     for (const line of lines) {
       try {
         const telegram = parseTelegram(line.masterHex, line.slaveHex);
         const key = messageKey(telegram);
-        parsed.push({ line, telegram, key });
+        parsed.push({ line, telegram, key, fresh: true });
         if (line.count !== undefined) {
           countTotals.set(key, (countTotals.get(key) ?? 0) + line.count);
-          const lineKey = `${key}|${line.masterHex}`;
-          const before = this.#lineCounts.get(lineKey);
-          this.#lineCounts.set(lineKey, line.count);
-          if (before !== undefined && line.count > before) delivered.set(key, (delivered.get(key) ?? 0) + 1);
+          batchCounts.set(key, [...(batchCounts.get(key) ?? []), line.count]);
         }
       } catch {
         stats.invalid++;
       }
     }
+    // which lines bring new telegrams: their counter changed since the last poll
+    /** Lines per key whose counter changed: the telegrams this poll actually delivers. */
+    const delivered = new Map<string, number>();
+    for (const p of parsed) {
+      if (p.line.count === undefined) continue;
+      const before = this.#lineCounts.get(p.key);
+      if (before) {
+        p.fresh = !before.includes(p.line.count);
+      } else {
+        // first poll of this key: of several lines for the same telegram, only the
+        // one ebusd counted most often is current (the others are stale copies)
+        const same = parsed.filter((o) => o.key === p.key && o.line.masterHex === p.line.masterHex && o.line.count !== undefined);
+        p.fresh = same.every((o) => o === p || o.line.count! < p.line.count! || (o.line.count === p.line.count && parsed.indexOf(o) > parsed.indexOf(p)));
+      }
+      if (p.fresh && before) delivered.set(p.key, (delivered.get(p.key) ?? 0) + 1);
+    }
+    for (const [key, counts] of batchCounts) this.#lineCounts.set(key, counts);
     const countsDone = new Set<string>();
 
-    for (const { line, telegram, key } of parsed) {
+    for (const { line, telegram, key, fresh } of parsed) {
       const payload = payloadHex(telegram);
       const fullMaster = masterHex(telegram);
       const known = opts.unknownMasters ? !opts.unknownMasters.has(fullMaster) : undefined;
       let entry = this.#entries.get(key);
 
+      if (!entry && !fresh) continue;
       if (!entry) {
         entry = {
           key,
@@ -199,16 +218,19 @@ export class TelegramStore {
         entry.lastSeen = now;
       }
 
-      const last = entry.history.at(-1);
-      if (!last || last.master !== payload.master || last.slave !== payload.slave) {
-        entry.history.push({ t: now, ...payload });
-        if (entry.history.length > HISTORY_LIMIT) entry.history.splice(0, entry.history.length - HISTORY_LIMIT);
-        entry.lastChanged = now;
-        entry.lastSeen = now;
-        stats.changed++;
+      // a stale line of ebusd brings no new telegram: keep its payload out
+      if (fresh) {
+        const last = entry.history.at(-1);
+        if (!last || last.master !== payload.master || last.slave !== payload.slave) {
+          entry.history.push({ t: now, ...payload });
+          if (entry.history.length > HISTORY_LIMIT) entry.history.splice(0, entry.history.length - HISTORY_LIMIT);
+          entry.lastChanged = now;
+          entry.lastSeen = now;
+          stats.changed++;
+        }
+        entry.lastMasterHex = fullMaster;
+        entry.lastSlaveHex = slaveHex(telegram);
       }
-      entry.lastMasterHex = fullMaster;
-      entry.lastSlaveHex = slaveHex(telegram);
       if (known !== undefined) entry.known = known;
       if (line.extra) entry.info = line.extra;
       if (telegram.lengthMismatch) entry.lengthMismatch = true;

@@ -38,6 +38,14 @@ try {
   step(`definitions: ${await page.textContent('.device.defs')}`);
   await page.screenshot({ path: `${out}/1-decoded.png` });
 
+  step('stale ebusd lines are ignored');
+  {
+    // the fake lists an old copy of hmu.Status01 (response …3c 00 05…) before the current one
+    const resp = await page.textContent('tr[data-key="1008b51101"] td[data-label="Response"]');
+    const hist = await page.$$eval('tr[data-key="1008b51101"]', (r) => r.length);
+    if (/3c\s*00\s*05/.test(resp ?? '') || hist !== 1) throw new Error(`stale payload shown: ${resp}`);
+  }
+
   step('messages faster than the polling are flagged (Q5)');
   await page.waitForSelector('tr[data-key="10feb51600"] .tag.cov', { timeout: 30_000 });
   step(`date/time broadcast: ${await page.textContent('tr[data-key="10feb51600"] .tag.cov')}`);

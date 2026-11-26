@@ -48,6 +48,9 @@ export function simulatedTelegrams(tick) {
     // hmu.FlowTemp: IGN:3 + D2C
     { m: '3108b51a0405ff3220', s: `05000000${le(Math.round(flow * 16), 2)}`, c: 5 + tick, known: true },
     // hmu.Status01: D1C D1C D2B D1C D1C UCH
+    // a stale copy like real ebusd keeps it (grabbed before the definition was
+    // loaded): same telegram, old payload, counter frozen
+    { m: '1008b5110101', s: '07463c0005646401', c: 1, known: true },
     { m: '1008b5110101', s: `07${hex(Math.round(flow * 2))}3c${le(Math.round(outside * 256), 2)}646401`, c: 4 + tick, known: true },
     // ctlv2.DisplayedOutsideTemp: IGN:4 + EXP
     { m: '3115b524060200000073' + '00', s: `0800000000${float(outside)}`, c: 2 + tick, known: true },

@@ -130,3 +130,25 @@ test('counts how many telegrams the app received (Q5)', async () => {
   poll(['1008b5090101 / 0101 = 9'], 0);
   assert.equal(s.get('1008b50901')!.occurred, undefined);
 });
+
+test('ignores stale lines ebusd keeps for the same telegram', () => {
+  // ebusd can list one telegram twice in `grab result all`: grabbed under its
+  // definition's key and, from before the definition was loaded, under a key
+  // for unknown messages. That old line keeps its payload and counter forever.
+  const s = new TelegramStore();
+  const stale = 'f108b509055402005b0d / 0802015b0dfd17f343 = 1000'; // 486.187 W, from hours ago
+  const poll = (current: string, count: number, t: number) =>
+    s.ingest(parseGrabResult([stale, `f108b509055402005b0d / 0802015b0d${current} = ${count}`]), { now: T0 + t });
+  poll('4d20aa44', 5000, 0); // 1361 W
+  poll('4d20aa44', 5003, 5000);
+  poll('bce0aa44', 5005, 10000);
+  poll('e180aa44', 5008, 15000);
+  const e = s.get('f108b5095402005b0d')!;
+  assert.deepEqual(e.history.map((x) => x.slave), ['02015b0d4d20aa44', '02015b0dbce0aa44', '02015b0de180aa44']);
+  assert.equal(e.lastSlaveHex, '0802015b0de180aa44');
+  assert.deepEqual([e.occurred, e.observed], [8, 3]);
+  // the stale line alone (e.g. listed first) does not create history either
+  const s2 = new TelegramStore();
+  s2.ingest(parseGrabResult([stale, 'f108b509055402005b0d / 0802015b0d4d20aa44 = 5000']), { now: T0 });
+  assert.deepEqual(s2.get('f108b5095402005b0d')!.history.map((x) => x.slave), ['02015b0d4d20aa44']);
+});
