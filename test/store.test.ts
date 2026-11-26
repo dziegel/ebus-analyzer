@@ -105,3 +105,28 @@ test('view filters, searches and sorts with new entries first', () => {
   const named = applyView(all, { filter: 'all', sort: 'count', search: 'hmu00' }, { deviceName: (a) => (a === 0x08 ? 'HMU00' : undefined) });
   assert.equal(named.length, 2);
 });
+
+test('counts how many telegrams the app received (Q5)', async () => {
+  const { coverage } = await import('../src/store/telegram-store.ts');
+  const s = new TelegramStore();
+  const poll = (lines: string[], t: number) => s.ingest(parseGrabResult(lines), { now: T0 + t });
+  poll(['1008b5090101 / 0101 = 1'], 0);
+  const e = s.get('1008b50901')!;
+  assert.equal(e.occurred, undefined); // nothing counted before the second poll
+  poll(['1008b5090101 / 0102 = 4'], 5000); // 3 telegrams, the app sees the last one
+  assert.deepEqual([e.occurred, e.observed], [3, 1]);
+  poll(['1008b5090101 / 0103 = 5'], 10000);
+  poll(['1008b5090101 / 0103 = 5'], 15000); // nothing new
+  assert.deepEqual([e.occurred, e.observed], [4, 2]);
+  assert.equal(coverage(e), undefined); // too few to judge
+  poll(['1008b5090101 / 0104 = 6'], 20000);
+  assert.equal(coverage(e), 3 / 5);
+  // two ebusd lines for one message key: both changed lines are received
+  poll(['10feb5160301803f = 1', '10feb51603010040 = 1'], 0);
+  poll(['10feb5160301803f = 2', '10feb51603010040 = 3'], 5000);
+  const b = s.get('10feb51601')!;
+  assert.deepEqual([b.occurred, b.observed], [3, 2]);
+  s.clear();
+  poll(['1008b5090101 / 0101 = 9'], 0);
+  assert.equal(s.get('1008b50901')!.occurred, undefined);
+});

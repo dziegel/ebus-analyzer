@@ -29,6 +29,13 @@ export interface Entry {
   count: number;
   /** Smoothed time between occurrences in ms, if it could be estimated. */
   intervalMs?: number;
+  /**
+   * Coverage (Q5): telegrams that occurred between two polls according to
+   * ebusd's counter, and how many of them the app received. ebusd keeps only
+   * the last telegram per message, so a poll sees at most one per ebusd line.
+   */
+  occurred?: number;
+  observed?: number;
   /** Whether ebusd has a definition for it; undefined if unknown (e.g. offline import). */
   known?: boolean;
   /** True until the user marks it as seen. */
@@ -44,6 +51,15 @@ export interface Entry {
 }
 
 export const HISTORY_LIMIT = 1000;
+
+/** Below this share of received telegrams, a message is flagged as faster than the polling (Q5). */
+export const COVERAGE_WARN = 0.9;
+
+/** Share of the telegrams of a message that the app received, once at least `min` were counted. */
+export function coverage(e: Entry, min = 5): number | undefined {
+  if (!e.occurred || e.occurred < min || e.observed === undefined) return undefined;
+  return Math.min(1, e.observed / e.occurred);
+}
 
 export interface IngestOptions {
   /** Observation time (ms since epoch). */
@@ -71,6 +87,8 @@ export class TelegramStore {
   #entries = new Map<string, Entry>();
   /** Last total of ebusd's counters per message key (sum over all lines of that key). */
   #ebusdCounts = new Map<string, number>();
+  /** Last counter per ebusd line (its master telegram), to tell how many telegrams a poll delivered. */
+  #lineCounts = new Map<string, number>();
   #listeners = new Set<() => void>();
 
   get size(): number {
@@ -100,12 +118,20 @@ export class TelegramStore {
     // ebusd's counters over all lines of that key in this batch.
     const parsed = [];
     const countTotals = new Map<string, number>();
+    /** Lines per key whose counter increased: the telegrams this poll actually delivers. */
+    const delivered = new Map<string, number>();
     for (const line of lines) {
       try {
         const telegram = parseTelegram(line.masterHex, line.slaveHex);
         const key = messageKey(telegram);
         parsed.push({ line, telegram, key });
-        if (line.count !== undefined) countTotals.set(key, (countTotals.get(key) ?? 0) + line.count);
+        if (line.count !== undefined) {
+          countTotals.set(key, (countTotals.get(key) ?? 0) + line.count);
+          const lineKey = `${key}|${line.masterHex}`;
+          const before = this.#lineCounts.get(lineKey);
+          this.#lineCounts.set(lineKey, line.count);
+          if (before !== undefined && line.count > before) delivered.set(key, (delivered.get(key) ?? 0) + 1);
+        }
       } catch {
         stats.invalid++;
       }
@@ -163,6 +189,8 @@ export class TelegramStore {
           }
           entry.count += delta;
           entry.lastSeen = now;
+          entry.occurred = (entry.occurred ?? 0) + delta;
+          entry.observed = (entry.observed ?? 0) + Math.min(delta, Math.max(1, delivered.get(key) ?? 0));
         } else if (previous === undefined) {
           entry.lastSeen = now;
         }
@@ -206,6 +234,7 @@ export class TelegramStore {
   clear(): void {
     this.#entries.clear();
     this.#ebusdCounts.clear();
+    this.#lineCounts.clear();
     this.#emit();
   }
 
@@ -219,6 +248,7 @@ export class TelegramStore {
     if (!s || s.version !== 1 || !Array.isArray(s.entries)) throw new Error('unsupported capture format');
     this.#entries.clear();
     this.#ebusdCounts.clear();
+    this.#lineCounts.clear();
     for (const e of s.entries) {
       if (typeof e?.key === 'string' && Array.isArray(e.history)) this.#entries.set(e.key, e);
     }

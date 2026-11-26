@@ -38,6 +38,11 @@ try {
   step(`definitions: ${await page.textContent('.device.defs')}`);
   await page.screenshot({ path: `${out}/1-decoded.png` });
 
+  step('messages faster than the polling are flagged (Q5)');
+  await page.waitForSelector('tr[data-key="10feb51600"] .tag.cov', { timeout: 30_000 });
+  step(`date/time broadcast: ${await page.textContent('tr[data-key="10feb51600"] .tag.cov')}`);
+  if (await page.$('tr[data-key="1008b51101"] .tag.cov')) throw new Error('a message polled completely is flagged');
+
   step('separator between list and detail panel (UI-6)');
   await page.click('tr[data-key="1008b51101"]');
   const sep = await page.waitForSelector('#splitter:not([hidden])');

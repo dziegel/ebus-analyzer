@@ -33,6 +33,12 @@ dependencies) relays a WebSocket to the ebusd command port and serves the web
 app. The app polls `grab result all` and `grab result` to collect telegrams and
 to tell known from unknown messages.
 
+ebusd keeps only the last telegram per message, so the app cannot see
+telegrams that come and go between two polls. Counts and intervals are still
+exact (from ebusd's counters). Messages that repeat faster than the polling are
+marked in the list with the share the app received (e.g. "33 % seen"); the
+detail panel shows the numbers. A shorter poll interval (settings) helps.
+
 By default the bridge only relays read-only commands (`info`, `grab`, `scan`,
 `read` of defined messages, `find`, `decode`, …). Commands that send a telegram
 given by the client or change ebusd (`write`, `hex`, `define`, `read -h`,

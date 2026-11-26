@@ -6,7 +6,7 @@ import type { Decoded } from '../defs/repository.ts';
 import type { DecodedField } from '../defs/fields.ts';
 import type { LoadReport } from '../defs/loader.ts';
 import type { Telegram } from '../ebus/telegram.ts';
-import type { Entry } from '../store/telegram-store.ts';
+import { COVERAGE_WARN, coverage, type Entry } from '../store/telegram-store.ts';
 import { ago, bytesHtml, dateTime, duration, esc, hex2, timestamp, varyingBytes } from './format.ts';
 import { isKnown, type Participant, type ViewContext } from './view.ts';
 import { renderByteAnalysis, renderNotes, type ByteSelection } from './analysis.ts';
@@ -206,6 +206,29 @@ function messageCell(d: Decoded | undefined, extra = ''): string {
   return `${name}<br><span class="small">${detail}</span>${extra}`;
 }
 
+/** "Seen 40 of 120 telegrams (33 %)" with an explanation, for messages faster than the polling (Q5). */
+export function coverageText(e: Entry): string | undefined {
+  const c = coverage(e);
+  if (c === undefined) return undefined;
+  return `The app received ${e.observed} of ${e.occurred} telegrams (${Math.round(c * 100)} %) since it started counting.`;
+}
+
+function coverageMark(e: Entry): string {
+  const c = coverage(e);
+  if (c === undefined || c >= COVERAGE_WARN) return '';
+  const title = `${coverageText(e)} ebusd keeps only the last telegram per message, and this one repeats faster than the app polls: values in between are missing from history, charts, value filter and assistant.`;
+  return ` <span class="tag warn cov" title="${esc(title)}">${Math.round(c * 100)} % seen</span>`;
+}
+
+function coverageFact(e: Entry): string {
+  const c = coverage(e);
+  if (c === undefined) return '';
+  const slow = c < COVERAGE_WARN;
+  return `<dt>Seen by app</dt><dd${slow ? ' class="cov-warn"' : ''}>${e.observed} of ${e.occurred} telegrams (${Math.round(c * 100)} %)${
+    slow ? `<br><span class="small">Repeats faster than the app polls${e.intervalMs !== undefined ? ` (every ~${duration(e.intervalMs)})` : ''}: ebusd keeps only the last telegram, so values in between are missing from history, charts, value filter and assistant. A shorter poll interval helps.</span>` : ''
+  }</dd>`;
+}
+
 export function renderRows(
   entries: readonly Entry[],
   ctx: ViewContext,
@@ -236,7 +259,7 @@ export function renderRows(
         `<td class="c-msg" data-label="Message">${messageCell(ctx.decoded?.(e), annotationHtml(e, ctx) + valueHitHtml(hits))}</td>` +
         `<td class="c-data mono" data-label="Data">${bytesHtml(last?.master ?? '', varMaster, 'var', hitBytes(e, hits, 'm'))}</td>` +
         `<td class="c-slave mono" data-label="Response">${e.kind === 'master-slave' ? bytesHtml(last?.slave ?? '', varSlave, 'var', hitBytes(e, hits, 's')) : '<span class="none">–</span>'}</td>` +
-        `<td class="c-num" data-label="Count">${e.count}<span class="muted small"> · ${duration(e.intervalMs)}</span></td>` +
+        `<td class="c-num" data-label="Count">${e.count}<span class="muted small"> · ${duration(e.intervalMs)}</span>${coverageMark(e)}</td>` +
         `<td class="c-num" data-label="Last seen" title="${esc(dateTime(e.lastSeen))}">${ago(e.lastSeen, now)}</td>` +
         `</tr>`
       );
@@ -370,6 +393,7 @@ export function renderDetail(e: Entry | undefined, ctx: DetailContext): string {
       <dt>Status</dt><dd>${knownBadge(e, ctx)}${e.isNew ? ' <span class="tag new">new</span>' : ''}${e.lengthMismatch ? ' <span class="tag warn">length mismatch</span>' : ''}${e.known !== undefined ? ` <span class="muted small">ebusd: ${e.known ? 'known' : 'unknown'}</span>` : ''}</dd>
       ${e.info ? `<dt>ebusd</dt><dd>${esc(e.info)}</dd>` : ''}
       <dt>Count</dt><dd>${e.count}${e.intervalMs !== undefined ? ` · every ~${duration(e.intervalMs)}` : ''}</dd>
+      ${coverageFact(e)}
       <dt>First seen</dt><dd>${dateTime(e.firstSeen)}</dd>
       <dt>Last change</dt><dd>${dateTime(e.lastChanged)}</dd>
     </dl>

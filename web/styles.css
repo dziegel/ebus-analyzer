@@ -401,3 +401,7 @@ label.check input { width: auto; }
 .live-entry.warn { border-color: var(--warn); }
 .live-entry code { word-break: break-all; }
 .live-entry .cmd { color: var(--muted); font-family: ui-monospace, monospace; font-size: 11px; word-break: break-all; }
+
+/* Messages faster than the polling (Q5) */
+.tag.cov { font-size: 11px; padding: 0 4px; margin-left: 4px; white-space: nowrap; }
+.cov-warn { color: var(--warn); }

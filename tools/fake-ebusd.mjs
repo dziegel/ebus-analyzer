@@ -40,7 +40,8 @@ export function simulatedTelegrams(tick) {
   const sec = tick % 60;
   const lines = [
     // Broadcast.Vdatetime: BTI (ss mm hh) + BDA (dd mm weekday yy)
-    { m: `10feb5160800${bcd(sec)}3014181103` + '26', s: null, c: 10 + tick, known: true },
+    // sent 3 times per poll: faster than the polling, so the app sees only a third (Q5)
+    { m: `10feb5160800${bcd(sec)}3014181103` + '26', s: null, c: 10 + 3 * tick, known: true },
     // Broadcast.Outsidetemp: D2B
     { m: `10feb5160301${le(Math.round(outside * 256), 2)}`, s: null, c: 3 + tick, known: true },
     // hmu.FlowTemp: IGN:3 + D2C
