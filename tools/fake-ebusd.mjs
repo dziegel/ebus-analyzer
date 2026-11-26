@@ -14,6 +14,7 @@ import { parseDefinitionFile } from '../src/defs/definitions.ts';
 import { decodeFields, ebusdText } from '../src/defs/fields.ts';
 import { hexToBytes } from '../src/ebus/hex.ts';
 import { parseFieldList, splitArgs } from '../src/ebusd/live.ts';
+import { CANDIDATE_TYPES, decodeCandidate } from '../src/analysis/candidates.ts';
 
 /** ebusd's default columns for definitions given on the command line (no level). */
 const DEF_HEADER = 'type,circuit,name,comment,qq,zz,pbsb,id,*name,part,type,divisor/values,unit,comment';
@@ -61,6 +62,29 @@ export function simulatedTelegrams(tick) {
 function format(lines) {
   return lines.map((l) => `${l.m}${l.s ? ` / ${l.s}` : ''} = ${l.c}`).join('\n');
 }
+
+/**
+ * `grab result decode`: each telegram followed by hint lines like ebusd's
+ * (` TYPE  hex=value, …` for the offsets where the type is valid), here for a
+ * few common types.
+ */
+function decodeHints(lines) {
+  const out = [];
+  for (const l of lines) {
+    out.push(format([l]));
+    const data = hexToBytes(l.s ? l.s.slice(2) : l.m.slice(10));
+    for (const c of CANDIDATE_TYPES.filter((t) => HINT_TYPES.includes(t.name))) {
+      const values = [];
+      for (let o = 0; o + c.length <= data.length; o++) {
+        const v = decodeCandidate(c, data, o);
+        if (v) values.push(`${Array.from(data.subarray(o, o + c.length), (b) => b.toString(16).padStart(2, '0')).join('')}=${v.text}`);
+      }
+      if (values.length) out.push(` ${c.name.padEnd(5)} ${values.join(', ')}`);
+    }
+  }
+  return out.join('\n');
+}
+const HINT_TYPES = ['D1C', 'D2B', 'D2C', 'SCH', 'SIN', 'UCH', 'UIN'];
 
 /** Parses a definition given to define / read -def. */
 function parseDef(text) {
@@ -167,6 +191,8 @@ export function startFakeEbusd(port = 8888, host = '127.0.0.1') {
         return format(simulatedTelegrams(tick));
       case 'grab result':
         return format(simulatedTelegrams(tick).filter((l) => !l.known));
+      case 'grab result decode':
+        return decodeHints(simulatedTelegrams(tick).filter((l) => !l.known));
       default:
         return 'ERR: command not found';
     }

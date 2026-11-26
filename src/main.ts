@@ -3,7 +3,8 @@ import { DecodingService, entryTelegram } from './decoding.ts';
 import { DefinitionLoader, localFile, type Cache } from './defs/loader.ts';
 import type { LoadedFile } from './defs/repository.ts';
 import { EbusdClient } from './ebusd/client.ts';
-import { parseGrabResult, type ScanDevice } from './ebusd/protocol.ts';
+import { parseGrabDecode, parseGrabResult, type ScanDevice } from './ebusd/protocol.ts';
+import { messageKey, parseTelegram } from './ebus/telegram.ts';
 import { loadSettings, saveSettings } from './settings.ts';
 import { kvGet, kvSet, throttle } from './store/persistence.ts';
 import { TelegramStore, type Entry } from './store/telegram-store.ts';
@@ -17,6 +18,7 @@ import {
   renderStatus,
   type DefinitionsState,
   type DetailContext,
+  type EbusdHints,
 } from './ui/render.ts';
 import { applyView, isKnown, participants, type FilterMode, type SortMode, type ViewState } from './ui/view.ts';
 import { AnnotationStore, parseTags } from './store/annotations.ts';
@@ -45,6 +47,7 @@ import { suggestFileName, writeTypeSpec } from './tsp/writer.ts';
 import { createZip } from './util/zip.ts';
 import { offsetOf, positionOf, renderDiagnostics, renderFiles, sortedDiagnostics } from './ui/typespec.ts';
 import { initSplitter } from './ui/splitter.ts';
+import { copyText, copyWithFeedback } from './ui/clipboard.ts';
 import { createDraft, defaultCircuit, draftCsvLine, draftDefinition, setIdLength, validateDraft, type Direction, type Draft, type DraftField, type Issue } from './assistant/draft.ts';
 import { DraftStore, DRAFTS_PATH, TSP_MARKER, draftTspPath } from './assistant/store.ts';
 import { parseFilename } from './defs/select.ts';
@@ -148,6 +151,7 @@ function viewContext(): DetailContext {
     charted: new Set(chartSources.map(seriesId)),
     hasDraft: (key: string) => !!drafts.get(key),
     liveCommands: settings.liveCommands,
+    ebusdHints: (key: string) => ebusdHints.get(key),
     telegram: entryTelegram,
     decodeSample: (e: Entry, i: number) => {
       const s = e.history[i];
@@ -508,7 +512,14 @@ detailEl.addEventListener('click', (ev) => {
   else if (action === 'mark-seen' && entry) store.markSeen(entry.key);
   else if (action === 'copy' && entry) {
     const text = entry.lastMasterHex + (entry.lastSlaveHex ? ` / ${entry.lastSlaveHex}` : '');
-    void navigator.clipboard?.writeText(text);
+    const button = (ev.target as HTMLElement).closest<HTMLElement>('[data-action]')!;
+    void copyText(text).then((ok) => {
+      if (!ok) prompt('Copying is not possible here – copy the telegram with Ctrl+C:', text);
+      else {
+        button.textContent = 'Copied';
+        setTimeout(() => (button.textContent = 'Copy telegram'), 1500);
+      }
+    });
   } else if (entry) {
     const el = (ev.target as HTMLElement).closest<HTMLElement>('[data-action]')!;
     const part = el.dataset.p === 's' ? 's' : 'm';
@@ -545,6 +556,9 @@ detailEl.addEventListener('click', (ev) => {
         break;
       case 'hexsend':
         openHexSend(entry);
+        break;
+      case 'ebusd-hints':
+        void fetchEbusdHints(entry);
         break;
     }
   }
@@ -958,7 +972,10 @@ function showTypeSpecView(def: import('./defs/definitions.ts').MessageDef, fileP
   tspViewDialog.showModal();
 }
 $('tsp-view-close').addEventListener('click', () => tspViewDialog.close());
-$('tsp-view-copy').addEventListener('click', () => void navigator.clipboard?.writeText(($('tsp-view-text') as HTMLTextAreaElement).value));
+$('tsp-view-copy').addEventListener('click', () => {
+  const ta = $('tsp-view-text') as HTMLTextAreaElement;
+  void copyWithFeedback($('tsp-view-copy'), ta.value, ta);
+});
 $('tsp-view-add').addEventListener('click', () => {
   if (!tspViewDefs) return;
   if (!tspProject) setProject({ name: 'drafts', files: new Map(), changed: new Set() }, undefined);
@@ -1172,7 +1189,10 @@ $('as-delete').addEventListener('click', () => {
   renderAssistant(false);
   detailEl.dataset.key = '';
 });
-$('as-copy').addEventListener('click', () => void navigator.clipboard?.writeText(($('as-preview') as HTMLTextAreaElement).value));
+$('as-copy').addEventListener('click', () => {
+  const ta = $('as-preview') as HTMLTextAreaElement;
+  void copyWithFeedback($('as-copy'), ta.value, ta);
+});
 $('as-project').addEventListener('click', () => {
   if (!asDraft) return;
   if (asDirty || !drafts.get(asDraft.key)) drafts.save(structuredClone(asDraft));
@@ -1364,6 +1384,33 @@ document.querySelector('.as-live-head')!.addEventListener('click', (ev) => {
       updateLiveButtons();
     });
 });
+// ---------------------------------------------------------------------------
+// ebusd's decoding hints (CON-5)
+
+const ebusdHints = new Map<string, EbusdHints>();
+
+async function fetchEbusdHints(e: Entry): Promise<void> {
+  ebusdHints.set(e.key, { t: Date.now(), loading: true });
+  detailEl.dataset.key = '';
+  scheduleRender();
+  let result: EbusdHints;
+  try {
+    const answer = await client.command('grab result decode');
+    if (isError(answer)) result = { t: Date.now(), error: answer.join(' ') };
+    else {
+      const all = parseGrabDecode(answer);
+      // the same telegram as the latest one captured, else the same message key
+      const entry = all.find((x) => x.masterHex === e.lastMasterHex) ?? all.find((x) => messageKey(parseTelegram(x.masterHex, x.slaveHex)) === e.key);
+      result = entry ? { t: Date.now(), entry } : { t: Date.now() };
+    }
+  } catch (err) {
+    result = { t: Date.now(), error: err instanceof Error ? err.message : String(err) };
+  }
+  ebusdHints.set(e.key, result);
+  detailEl.dataset.key = '';
+  scheduleRender();
+}
+
 // ---------------------------------------------------------------------------
 // Send a telegram with hex (M6: CON-7)
 

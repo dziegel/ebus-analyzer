@@ -11,7 +11,7 @@ Browser tool that simplifies reverse engineering of eBUS traffic using
 - Decodes telegrams with the definitions from
   [ebusd-configuration](https://github.com/john30/ebusd-configuration)
 - Analyses unknown telegrams: byte heat map, decoding as candidate types,
-  value search, charts over time, notes and tags
+  ebusd's own decoding hints, value search, charts over time, notes and tags
 - Reads, edits and compiles eBUS TypeSpec in the browser with the official
   TypeSpec compiler and ebus-typespec, and writes TypeSpec from definitions
 - Definition assistant: turns an unknown telegram into a definition with type
@@ -122,6 +122,11 @@ The history keeps up to 1000 different payloads per message. Payloads are
 collected by polling ebusd's grab result, so a value that changes and changes
 back between two polls is missed (Q5 in the requirements).
 
+For messages ebusd does not know, **ebusd's hints** in the detail panel shows
+ebusd's own decoding of the latest telegram (`grab result decode`): every data
+type ebusd knows, with its value at each byte offset of the response (or of
+the data for broadcasts).
+
 ## TypeSpec
 
 The *TypeSpec* dialog works on a folder of `.tsp` files, e.g. the `src`
@@ -206,6 +211,18 @@ confirmed in a dialog that shows what is sent.
 
 Requirements: Node.js 22.18 or newer, a running ebusd.
 
+**From a release (no build step):** download `ebus-analyzer-X.Y.Z.zip` from the
+[releases](https://github.com/dziegel/ebus-analyzer/releases), unpack it and
+start the bridge:
+
+```sh
+unzip ebus-analyzer-X.Y.Z.zip
+cd ebus-analyzer-X.Y.Z
+node bridge/ebusd-bridge.mjs --ebusd-host <ebusd-host>
+```
+
+**From source:**
+
 ```sh
 git clone https://github.com/dziegel/ebus-analyzer.git
 cd ebus-analyzer
@@ -217,7 +234,7 @@ node bridge/ebusd-bridge.mjs --ebusd-host <ebusd-host>
 Then open `http://<bridge-host>:8080/` in Chrome or Firefox (PC or phone).
 The app connects automatically when it is served by the bridge.
 
-To update, rebuild after pulling; the bridge serves the compiled app from
+To update a source checkout, rebuild after pulling; the bridge serves the compiled app from
 `web/dist`, and until it is rebuilt the page shows a red warning (also logged
 by the bridge):
 
@@ -280,6 +297,10 @@ EBUSD_SRC=../ebusd EBUS_CDN=../ebus.github.io npm test
   the simulated traffic of `tools/fake-ebusd.mjs`.
 - `EBUSD_CONFIG` (a clone of ebusd-configuration) with the npm packages
   installed: compiles the complete configuration and compares it with the CDN.
+
+Releases: set the version in `package.json`, commit, then tag and push
+(`git tag v0.2.0 && git push origin v0.2.0`). The release workflow tests,
+builds and attaches the ZIP to a GitHub release.
 
 `test/e2e/browser.mjs` runs the whole chain in a headless browser (fake ebusd →
 bridge → app → definitions from the CDN → TypeSpec compile in the worker →

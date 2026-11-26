@@ -1,7 +1,7 @@
 import { isMaster, slaveOfMaster } from '../ebus/address.ts';
 import type { CaptureStatus } from '../capture.ts';
 import type { ConnectionState } from '../ebusd/client.ts';
-import type { ScanDevice } from '../ebusd/protocol.ts';
+import type { GrabDecodeEntry, ScanDevice } from '../ebusd/protocol.ts';
 import type { Decoded } from '../defs/repository.ts';
 import type { DecodedField } from '../defs/fields.ts';
 import type { LoadReport } from '../defs/loader.ts';
@@ -229,6 +229,37 @@ function coverageFact(e: Entry): string {
   }</dd>`;
 }
 
+/** Result of fetching ebusd's decoding hints for a message. */
+export interface EbusdHints {
+  t: number;
+  loading?: boolean;
+  entry?: GrabDecodeEntry;
+  error?: string;
+}
+
+/** ebusd's own decoding hints (`grab result decode`) for the latest telegram (CON-5). */
+export function renderEbusdHints(h: EbusdHints | undefined): string {
+  if (!h) return '';
+  const head = (note: string) =>
+    `<h3>ebusd's decoding hints <span class="muted small">${note}</span> <button type="button" class="small" data-action="ebusd-hints">Refresh</button></h3>`;
+  if (h.loading) return `<section class="ebusd-hints"><h3>ebusd's decoding hints <span class="muted small">loading…</span></h3></section>`;
+  if (h.error) return `<section class="ebusd-hints">${head(`· ${timestamp(h.t)}`)}<p class="muted">${esc(h.error)}</p></section>`;
+  const en = h.entry;
+  if (!en) {
+    return `<section class="ebusd-hints">${head(`· ${timestamp(h.t)}`)}<p class="muted">ebusd lists no unknown telegram for this message (it may have a definition for it, or grabbing was restarted).</p></section>`;
+  }
+  const part = en.part === 's' ? 'response' : 'data incl. ID';
+  const rows = en.hints
+    .map(
+      (hint) =>
+        `<tr><td class="mono">${esc(hint.type)}</td><td>${hint.values
+          .map((v) => `<span class="hint" title="${esc(`${part} byte ${v.offset}${v.hex.length > 2 ? `–${v.offset + v.hex.length / 2 - 1}` : ''}: ${v.hex}`)}"><span class="muted">${v.offset}:</span> ${esc(v.text)}</span>`)
+          .join(' ')}</td></tr>`,
+    )
+    .join('');
+  return `<section class="ebusd-hints">${head(`· ${part}, latest telegram, ${timestamp(h.t)}`)}<div class="hints-wrap"><table class="hints"><thead><tr><th>Type</th><th>Byte offset: value</th></tr></thead><tbody>${rows}</tbody></table></div></section>`;
+}
+
 export function renderRows(
   entries: readonly Entry[],
   ctx: ViewContext,
@@ -344,6 +375,8 @@ export interface DetailContext extends ViewContext {
   hasDraft?: (key: string) => boolean;
   /** Commands that send to the bus are enabled in the settings (M6). */
   liveCommands?: boolean;
+  /** ebusd's decoding hints fetched for a message (CON-5). */
+  ebusdHints?: (key: string) => EbusdHints | undefined;
 }
 
 /** Number of history rows shown in the detail panel. */
@@ -385,7 +418,9 @@ export function renderDetail(e: Entry | undefined, ctx: DetailContext): string {
     ${t ? `<p class="telegram mono">${telegramHtml(t)}</p>` : ''}
     ${decoded ? renderDecoded(decoded, t, e.key, charted) : ctx.definitionsLoaded ? '<p class="muted">No definition matches this message.</p>' : ''}
     <p><button type="button" class="${decoded ? 'small' : 'primary'}" data-action="assistant">${ctx.hasDraft?.(e.key) ? 'Edit definition draft' : decoded ? 'New definition draft' : 'Create definition'}</button>
+      ${e.known === false ? `<button type="button" class="small" data-action="ebusd-hints" title="ebusd decodes the latest telegram with all its data types (grab result decode)">ebusd's hints</button>` : ''}
       <button type="button" class="small" data-action="hexsend"${ctx.liveCommands ? '' : ' disabled title="Enable &quot;Allow commands that send to the bus or change ebusd&quot; in the settings"'}>Send telegram…</button></p>
+    ${renderEbusdHints(ctx.ebusdHints?.(e.key))}
     <dl class="facts">
       <dt>Type</dt><dd>${esc(e.kind)}</dd>
       <dt>From</dt><dd>${hex2(e.source)}${src ? ` (${esc(src)})` : ''}</dd>

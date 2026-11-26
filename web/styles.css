@@ -405,3 +405,10 @@ label.check input { width: auto; }
 /* Messages faster than the polling (Q5) */
 .tag.cov { font-size: 11px; padding: 0 4px; margin-left: 4px; white-space: nowrap; }
 .cov-warn { color: var(--warn); }
+
+/* ebusd's decoding hints (CON-5) */
+.ebusd-hints h3 { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.hints-wrap { max-height: 280px; overflow: auto; border: 1px solid var(--line); border-radius: 6px; }
+table.hints td, table.hints th { padding: 2px 6px; font-size: 12px; vertical-align: top; }
+table.hints th { position: sticky; top: 0; }
+table.hints .hint { display: inline-block; margin-right: 8px; white-space: nowrap; }

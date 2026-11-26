@@ -175,6 +175,14 @@ try {
   step(`hex: ${(await page.textContent('#hex-log'))?.replace(/\s+/g, ' ')}`);
   await page.screenshot({ path: `${out}/9-hex.png` });
   await page.click('#hex-close');
+
+  step("ebusd's decoding hints (CON-5)");
+  await page.click('#detail [data-action="ebusd-hints"]');
+  await page.waitForSelector('#detail table.hints');
+  const d2c = await page.$$eval('#detail table.hints tr', (rows) => rows.find((r) => r.cells[0]?.textContent === 'D2C')?.cells[1]?.textContent ?? '');
+  step(`D2C: ${d2c}`);
+  if (!/1: -?\d+\.\d\d/.test(d2c)) throw new Error(`no D2C hint at response offset 1: ${d2c}`);
+  await page.screenshot({ path: `${out}/10-ebusd-hints.png` });
   if (errors.length) throw new Error(`browser errors: ${errors.join('\n')}`);
   step('ok');
 } catch (err) {

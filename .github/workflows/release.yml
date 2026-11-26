@@ -1,0 +1,43 @@
+name: Release
+
+# Push a tag vX.Y.Z (matching package.json) to build the app and attach a
+# ready-to-run ZIP (bridge + web app, no build step needed) to a GitHub release.
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    env:
+      REQUIRE_TSP: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install
+      - name: Check that the tag matches package.json
+        run: test "v$(node -p "require('./package.json').version")" = "$GITHUB_REF_NAME"
+      - run: npm test
+      - run: npm run build
+      - name: Package
+        run: |
+          name="ebus-analyzer-${GITHUB_REF_NAME#v}"
+          mkdir -p "release/$name"
+          # -a keeps the timestamps: the bridge warns if web/dist is older than src
+          cp -a bridge web tools src LICENSE README.md package.json "release/$name/"
+          (cd release && zip -qr "$name.zip" "$name")
+          echo "ZIP=release/$name.zip" >> "$GITHUB_ENV"
+      - name: Check the package
+        run: |
+          cd release/ebus-analyzer-*/
+          test -f web/dist/main.js && test -f web/dist/tsp-worker.js
+          node -e "import('./bridge/ebusd-bridge.mjs').then(async (b) => { const p = await b.buildProblem('web'); if (p) { console.error(p); process.exit(1); } })"
+      - name: Create release
+        run: gh release create "$GITHUB_REF_NAME" "$ZIP" --title "$GITHUB_REF_NAME" --generate-notes
+        env:
+          GH_TOKEN: ${{ github.token }}

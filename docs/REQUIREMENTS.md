@@ -1,6 +1,6 @@
 # EBus Analyzer – Requirements
 
-Status: Draft · Last updated: 2026-11-26 · Implemented: M1, M2, M3, M4, M5, M6, M7, UI-5, UI-6
+Status: Draft · Last updated: 2026-11-26 · Implemented: M1, M2, M3, M4, M5, M6, M7, UI-5, UI-6, CON-5
 
 EBus Analyzer is a browser application that receives eBUS telegrams from
 [ebusd](https://github.com/john30/ebusd), decodes them using the message
@@ -84,9 +84,9 @@ the TCP command port therefore needs a bridge (see ARCH-2 and question Q1, decid
 |----|------|-------------|
 | ARCH-1 | M | The application is a static single-page app (HTML/JS/CSS) with no mandatory backend of its own. |
 | ARCH-2 | M | Access to the ebusd TCP command port goes through a thin, documented bridge (e.g. WebSocket-to-TCP proxy such as websockify, or a minimal companion script). The bridge must not interpret eBUS data. |
-| ARCH-3 | S | The app can also be served by ebusd itself (`--htmlpath`) so that the HTTP JSON port is same-origin. |
+| ARCH-3 | – | **Dropped (Q2):** ~~The app can also be served by ebusd itself (`--htmlpath`) so that the HTTP JSON port is same-origin.~~ The app is served by the bridge. |
 | ARCH-4 | M | Written in TypeScript; decoding and TypeSpec logic live in UI-independent modules with unit tests. |
-| ARCH-5 | S | Deployable to GitHub Pages and runnable from a local file server. |
+| ARCH-5 | S | Each tagged release carries a ready-built package (ZIP with bridge and web app, built by GitHub Actions) that runs without a build step; the app is served by the bridge (Q2). (Replaces "deployable to GitHub Pages": a page there cannot reach the bridge in the LAN.) |
 | ARCH-6 | M | All user data (captures, annotations, drafts) is stored locally in the browser (IndexedDB) and never sent anywhere except to ebusd and GitHub (read-only). |
 
 ---
@@ -178,9 +178,9 @@ the TCP command port therefore needs a bridge (see ARCH-2 and question Q1, decid
 
 | ID | Prio | Requirement |
 |----|------|-------------|
-| NFR-1 | M | Handles the full bus load of a 2400 baud eBUS without dropping telegrams in the UI. |
-| NFR-2 | M | Stores at least 100,000 telegrams locally; older data can be purged by the user. |
-| NFR-3 | M | Initial load (without definitions) under 3 s on a mid-range phone. |
+| NFR-1 | C | Handles the full bus load of a 2400 baud eBUS without dropping telegrams in the UI. |
+| NFR-2 | C | Stores at least 100,000 telegrams locally; older data can be purged by the user. |
+| NFR-3 | C | Initial load (without definitions) under 3 s on a mid-range phone. |
 | NFR-4 | M | No telemetry; no data leaves the browser except requests to ebusd and read-only requests to GitHub. |
 | NFR-5 | M | Writing to the bus is disabled by default and needs an explicit opt-in. (App setting plus bridge `--allow-write`; the read-only bridge also blocks `read -h` / `read -def`, which send telegrams given by the client.) |
 | NFR-6 | S | Automated build, tests and deployment via GitHub Actions. |
@@ -195,7 +195,7 @@ the TCP command port therefore needs a bridge (see ARCH-2 and question Q1, decid
 |----|------|-------------|
 | GH-1 | M | Source code, issues and documentation live in this repository. |
 | GH-2 | M | README describes setup of ebusd (required options, ports) and the bridge. |
-| GH-3 | S | Releases are tagged and the app is published via GitHub Pages. |
+| GH-3 | S | Releases are tagged (`vX.Y.Z`, matching `package.json`); GitHub Actions builds the app and attaches the ZIP to the GitHub release. (Replaces publishing via GitHub Pages, see Q2.) |
 | GH-4 | S | Contribution guide, including how to submit new definitions upstream to ebusd-configuration. |
 
 ---
@@ -205,7 +205,7 @@ the TCP command port therefore needs a bridge (see ARCH-2 and question Q1, decid
 | ID | Topic | Notes |
 |----|-------|-------|
 | Q1 | Bridge to the TCP port | **Decided (M1):** own small script, `bridge/ebusd-bridge.mjs` (Node, no dependencies). It relays a WebSocket to the ebusd command port, serves the web app on the same port (no extra web server, no cross-origin issues), is read-only by default (`--allow-write` to lift that) and warns when the app is not rebuilt. Rejected: websockify (extra Python install, relays every command unfiltered, does not serve the app) and MQTT over WebSocket (only carries values ebusd has already decoded, no raw unknown telegrams or `grab`). |
-| Q2 | HTTPS / mixed content | **Decided:** the app is served by the bridge over plain http on the LAN (`http://<bridge-host>:8080`), so page and WebSocket share one origin: no mixed content and no Private Network Access restrictions. Not used: hosting on GitHub Pages (an HTTPS page cannot open `ws://` to the LAN), ebusd `--htmlpath` (serves files only, the bridge is still needed), a bridge with TLS (certificates for a LAN host). Limitation: outside `localhost` such a page is not a secure context, so the File System Access API (writing a TypeSpec folder, TSP-4) and the clipboard API are not available there; the app falls back to upload/download. Loading definitions from https://ebus.github.io/ in the browser works (CORS allowed, checked in CI). |
+| Q2 | HTTPS / mixed content | **Decided:** the app is served by the bridge over plain http on the LAN (`http://<bridge-host>:8080`), so page and WebSocket share one origin: no mixed content and no Private Network Access restrictions. Not used: hosting on GitHub Pages (an HTTPS page cannot open `ws://` to the LAN), ebusd `--htmlpath` (serves files only, the bridge is still needed), a bridge with TLS (certificates for a LAN host). Limitation: outside `localhost` such a page is not a secure context, so the File System Access API (writing a TypeSpec folder, TSP-4) and the clipboard API are not available there; the app falls back to upload/download and to the older copy command (or asks to press Ctrl+C). Loading definitions from https://ebus.github.io/ in the browser works (CORS allowed, checked in CI). |
 | Q3 | TypeSpec in the browser | **Confirmed (M4):** `@typespec/compiler` and `@ebusd/ebus-typespec` run in a web worker with an in-memory host (bundled with esbuild). The complete ebusd-configuration compiles in about 2–3 s; the emitted CSV equals the CDN files (checked in CI). |
 | Q4 | Decoding source | **Decided (M2):** decode from the CSV files generated by ebus-typespec and served on https://ebus.github.io/ (same files and file selection as ebusd). TypeSpec is used for reading/writing in M4. |
 | Q5 | Capture method | **Decided:** keep polling `grab result all`, which returns only the last telegram per message, and make the gap visible: per message the app counts the telegrams that occurred between polls (ebusd's counter) and how many it received, flags messages below 90 % in the list ("33 % seen") and explains it in the detail panel. Counts and intervals stay exact; history, charts, value filter and assistant only contain the telegrams the app received. Not done for now: `listen -u` (pushes changes, but from the same last-telegram-per-message list) and following ebusd's raw log (`--lograwdata`, complete, but the bridge must reach ebusd's log file) – to revisit if important messages turn out to be missed. |

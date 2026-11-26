@@ -74,3 +74,34 @@ test('splits responses at empty lines across chunks', () => {
   s.push('\n');
   assert.deepEqual(responses.at(-1), ['x']);
 });
+
+test('parses ebusd decoding hints (grab result decode, CON-5)', async () => {
+  const { parseGrabDecode } = await import('../src/ebusd/protocol.ts');
+  // real ebusd output (shortened)
+  const answer = [
+    '1008b509030d5501 / 0401600181 = 1',
+    ' BCD:4 01600181=81016001',
+    ' D2C   0160=1536.06, 6001=22.00, 0181=-2031.94',
+    ' DAY   0160="17.04.1967", 6001="19.12.1900", 0181="03.06.1990"',
+    ' HEX:4 01600181="01 60 01 81"',
+    ' UCH   01=1, 60=96, 01=1, 81=129',
+    '10f1b5050427000000 = 3',
+    ' UCH   27=39, 00=0, 00=0, 00=0',
+    ' TTM   27="06:30"',
+  ];
+  const [reg, mm] = parseGrabDecode(answer);
+  assert.equal(reg!.masterHex, '1008b509030d5501');
+  assert.equal(reg!.part, 's');
+  assert.deepEqual(reg!.hints.find((h) => h.type === 'D2C')!.values, [
+    { offset: 0, hex: '0160', text: '1536.06' },
+    { offset: 1, hex: '6001', text: '22.00' },
+    { offset: 2, hex: '0181', text: '-2031.94' },
+  ]);
+  assert.deepEqual(reg!.hints.find((h) => h.type === 'UCH')!.values.map((v) => v.offset), [0, 1, 2, 3]);
+  assert.equal(reg!.hints.find((h) => h.type === 'HEX:4')!.values[0]!.text, '01 60 01 81');
+  // master-master: the master data (incl. ID) is decoded
+  assert.equal(mm!.part, 'm');
+  assert.equal(mm!.count, 3);
+  assert.deepEqual(mm!.hints.find((h) => h.type === 'UCH')!.values.map((v) => v.offset), [0, 1, 2, 3]);
+  assert.equal(mm!.hints.find((h) => h.type === 'TTM')!.values[0]!.text, '06:30');
+});
