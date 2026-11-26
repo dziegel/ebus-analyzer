@@ -210,7 +210,7 @@ function messageCell(d: Decoded | undefined, extra = ''): string {
 export function coverageText(e: Entry): string | undefined {
   const c = coverage(e);
   if (c === undefined) return undefined;
-  return `The app received ${e.observed} of ${e.occurred} telegrams (${Math.round(c * 100)} %) since it started counting.`;
+  return `The app received ${e.seenCount ?? 0} telegrams and missed ${e.missedCount ?? 0} (${Math.round(c * 100)} % seen), counted from poll to poll.`;
 }
 
 function coverageMark(e: Entry): string {
@@ -224,7 +224,7 @@ function coverageFact(e: Entry): string {
   const c = coverage(e);
   if (c === undefined) return '';
   const slow = c < COVERAGE_WARN;
-  return `<dt>Seen by app</dt><dd${slow ? ' class="cov-warn"' : ''}>${e.observed} of ${e.occurred} telegrams (${Math.round(c * 100)} %)${
+  return `<dt>Seen by app</dt><dd${slow ? ' class="cov-warn"' : ''}>${Math.round(c * 100)} %: ${e.seenCount ?? 0} received, ${e.missedCount ?? 0} missed${
     slow ? `<br><span class="small">Repeats faster than the app polls${e.intervalMs !== undefined ? ` (every ~${duration(e.intervalMs)})` : ''}: ebusd keeps only the last telegram, so values in between are missing from history, charts, value filter and assistant. A shorter poll interval helps.</span>` : ''
   }</dd>`;
 }

@@ -106,29 +106,39 @@ test('view filters, searches and sorts with new entries first', () => {
   assert.equal(named.length, 2);
 });
 
-test('counts how many telegrams the app received (Q5)', async () => {
+test('counts received and missed telegrams from poll to poll (Q5, UNK-13)', async () => {
   const { coverage } = await import('../src/store/telegram-store.ts');
   const s = new TelegramStore();
   const poll = (lines: string[], t: number) => s.ingest(parseGrabResult(lines), { now: T0 + t });
-  poll(['1008b5090101 / 0101 = 1'], 0);
-  const e = s.get('1008b50901')!;
-  assert.equal(e.occurred, undefined); // nothing counted before the second poll
-  poll(['1008b5090101 / 0102 = 4'], 5000); // 3 telegrams, the app sees the last one
-  assert.deepEqual([e.occurred, e.observed], [3, 1]);
-  poll(['1008b5090101 / 0103 = 5'], 10000);
-  poll(['1008b5090101 / 0103 = 5'], 15000); // nothing new
-  assert.deepEqual([e.occurred, e.observed], [4, 2]);
-  assert.equal(coverage(e), undefined); // too few to judge
-  poll(['1008b5090101 / 0104 = 6'], 20000);
-  assert.equal(coverage(e), 3 / 5);
+  const seen = (key: string) => [s.get(key)!.seenCount ?? 0, s.get(key)!.missedCount ?? 0];
+  // ebusd has been running for a long time: the start value of the counter does not count
+  poll(['1008b5090101 / 0101 = 250000'], 0);
+  assert.deepEqual(seen('1008b50901'), [0, 0]);
+  poll(['1008b5090101 / 0102 = 250003'], 5000); // jump by 3: one received, two missed
+  assert.deepEqual(seen('1008b50901'), [1, 2]);
+  poll(['1008b5090101 / 0103 = 250004'], 10000);
+  poll(['1008b5090101 / 0103 = 250004'], 15000); // nothing new
+  assert.deepEqual(seen('1008b50901'), [2, 2]);
+  assert.equal(coverage(s.get('1008b50901')!), undefined); // too few to judge
+  poll(['1008b5090101 / 0104 = 250005'], 20000);
+  assert.equal(coverage(s.get('1008b50901')!), 3 / 5);
+  // a gap in the polling (computer in standby): the jump is not counted
+  poll(['1008b5090101 / 0105 = 251000'], 3_600_000);
+  assert.deepEqual(seen('1008b50901'), [3, 2]);
+  assert.equal(s.get('1008b50901')!.count, 251000);
+  poll(['1008b5090101 / 0106 = 251001'], 3_605_000);
+  assert.deepEqual(seen('1008b50901'), [4, 2]);
+  // ebusd restarted (counter lower): nothing counted
+  poll(['1008b5090101 / 0107 = 3'], 3_610_000);
+  assert.deepEqual(seen('1008b50901'), [4, 2]);
   // two ebusd lines for one message key: both changed lines are received
   poll(['10feb5160301803f = 1', '10feb51603010040 = 1'], 0);
   poll(['10feb5160301803f = 2', '10feb51603010040 = 3'], 5000);
-  const b = s.get('10feb51601')!;
-  assert.deepEqual([b.occurred, b.observed], [3, 2]);
-  s.clear();
-  poll(['1008b5090101 / 0101 = 9'], 0);
-  assert.equal(s.get('1008b50901')!.occurred, undefined);
+  assert.deepEqual(seen('10feb51601'), [2, 1]);
+  // counts of the earlier version (which included polling gaps) are dropped on load
+  const old = new TelegramStore();
+  old.load({ version: 1, entries: [{ ...s.get('1008b50901')!, occurred: 460334, observed: 7 }] });
+  assert.equal('occurred' in old.get('1008b50901')!, false);
 });
 
 test('ignores stale lines ebusd keeps for the same telegram', () => {
@@ -146,7 +156,7 @@ test('ignores stale lines ebusd keeps for the same telegram', () => {
   const e = s.get('f108b5095402005b0d')!;
   assert.deepEqual(e.history.map((x) => x.slave), ['02015b0d4d20aa44', '02015b0dbce0aa44', '02015b0de180aa44']);
   assert.equal(e.lastSlaveHex, '0802015b0de180aa44');
-  assert.deepEqual([e.occurred, e.observed], [8, 3]);
+  assert.deepEqual([e.seenCount, e.missedCount], [3, 5]);
   // the stale line alone (e.g. listed first) does not create history either
   const s2 = new TelegramStore();
   s2.ingest(parseGrabResult([stale, 'f108b509055402005b0d / 0802015b0d4d20aa44 = 5000']), { now: T0 });

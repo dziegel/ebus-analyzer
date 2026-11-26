@@ -30,12 +30,15 @@ export interface Entry {
   /** Smoothed time between occurrences in ms, if it could be estimated. */
   intervalMs?: number;
   /**
-   * Coverage (Q5): telegrams that occurred between two polls according to
-   * ebusd's counter, and how many of them the app received. ebusd keeps only
-   * the last telegram per message, so a poll sees at most one per ebusd line.
+   * Coverage (Q5), counted from one poll to the next: telegrams the app
+   * received, and telegrams it missed because ebusd's counter went up by more
+   * than the app could see (ebusd keeps only the last telegram per message).
+   * Jumps above MAX_COUNTED_JUMP (e.g. after the computer slept) are not
+   * counted. Counting starts with the second poll after connecting, so the
+   * counter's start value does not matter.
    */
-  occurred?: number;
-  observed?: number;
+  seenCount?: number;
+  missedCount?: number;
   /** Whether ebusd has a definition for it; undefined if unknown (e.g. offline import). */
   known?: boolean;
   /** True until the user marks it as seen. */
@@ -55,10 +58,18 @@ export const HISTORY_LIMIT = 1000;
 /** Below this share of received telegrams, a message is flagged as faster than the polling (Q5). */
 export const COVERAGE_WARN = 0.9;
 
+/**
+ * Larger counter jumps between two polls are not counted as missed telegrams:
+ * they come from gaps in the polling (computer in standby, connection lost),
+ * not from a message that is faster than the polling.
+ */
+export const MAX_COUNTED_JUMP = 100;
+
 /** Share of the telegrams of a message that the app received, once at least `min` were counted. */
 export function coverage(e: Entry, min = 5): number | undefined {
-  if (!e.occurred || e.occurred < min || e.observed === undefined) return undefined;
-  return Math.min(1, e.observed / e.occurred);
+  const total = (e.seenCount ?? 0) + (e.missedCount ?? 0);
+  if (total < min) return undefined;
+  return (e.seenCount ?? 0) / total;
 }
 
 export interface IngestOptions {
@@ -208,8 +219,11 @@ export class TelegramStore {
           }
           entry.count += delta;
           entry.lastSeen = now;
-          entry.occurred = (entry.occurred ?? 0) + delta;
-          entry.observed = (entry.observed ?? 0) + Math.min(delta, Math.max(1, delivered.get(key) ?? 0));
+          if (previous !== undefined && delta <= MAX_COUNTED_JUMP) {
+            const got = Math.min(delta, Math.max(1, delivered.get(key) ?? 0));
+            entry.seenCount = (entry.seenCount ?? 0) + got;
+            entry.missedCount = (entry.missedCount ?? 0) + delta - got;
+          }
         } else if (previous === undefined) {
           entry.lastSeen = now;
         }
@@ -272,7 +286,11 @@ export class TelegramStore {
     this.#ebusdCounts.clear();
     this.#lineCounts.clear();
     for (const e of s.entries) {
-      if (typeof e?.key === 'string' && Array.isArray(e.history)) this.#entries.set(e.key, e);
+      if (typeof e?.key !== 'string' || !Array.isArray(e.history)) continue;
+      // counts of an earlier version that included polling gaps
+      delete (e as Entry & { occurred?: number; observed?: number }).occurred;
+      delete (e as Entry & { occurred?: number; observed?: number }).observed;
+      this.#entries.set(e.key, e);
     }
     this.#emit();
   }

@@ -35,9 +35,12 @@ to tell known from unknown messages.
 
 ebusd keeps only the last telegram per message, so the app cannot see
 telegrams that come and go between two polls. Counts and intervals are still
-exact (from ebusd's counters). Messages that repeat faster than the polling are
-marked in the list with the share the app received (e.g. "33 % seen"); the
-detail panel shows the numbers. A shorter poll interval (settings) helps.
+exact (from ebusd's counters). From one poll to the next the app counts each
+message's telegrams as received or missed: if ebusd's counter went up by 3, it
+got one and missed two. Jumps above 100 (e.g. after the computer slept) are not
+counted. Messages below 90 % are marked in the list with the share the app
+received (e.g. "33 % seen"); the detail panel shows the numbers. A shorter
+poll interval (settings) helps.
 
 By default the bridge only relays read-only commands (`info`, `grab`, `scan`,
 `read` of defined messages, `find`, `decode`, …). Commands that send a telegram
